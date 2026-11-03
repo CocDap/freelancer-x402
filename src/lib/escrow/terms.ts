@@ -54,8 +54,11 @@ function daysToWindow(days: number, label: string): number {
   return seconds;
 }
 
+/** Addresses that must never be the freelancer (relayer: would let it act as freelancer via direct calls). */
+export type ForbiddenFreelancers = { relayer?: Address; escrow?: Address };
+
 /** Validates user input and converts it to on-chain Terms. Throws TermsError (Vietnamese message). */
-export function toTerms(input: JobTermsInput, buyer: Address): Terms {
+export function toTerms(input: JobTermsInput, buyer: Address, forbidden: ForbiddenFreelancers = {}): Terms {
   if (typeof input.freelancer !== "string" || !isAddress(input.freelancer, { strict: false })) {
     throw new TermsError("Địa chỉ ví freelancer không hợp lệ.");
   }
@@ -63,6 +66,12 @@ export function toTerms(input: JobTermsInput, buyer: Address): Terms {
   if (freelancer === zeroAddress) throw new TermsError("Địa chỉ ví freelancer không được là địa chỉ 0x0.");
   if (freelancer === getAddress(buyer)) {
     throw new TermsError("Ví freelancer không được trùng với ví của người thuê.");
+  }
+  if (forbidden.relayer && freelancer === getAddress(forbidden.relayer)) {
+    throw new TermsError("Ví freelancer không được là ví relayer của hệ thống.");
+  }
+  if (forbidden.escrow && freelancer === getAddress(forbidden.escrow)) {
+    throw new TermsError("Ví freelancer không được là địa chỉ hợp đồng escrow.");
   }
 
   const raw = String(input.amountUsdc ?? "").trim();

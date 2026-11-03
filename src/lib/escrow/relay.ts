@@ -5,11 +5,14 @@ import {
   ContractFunctionRevertedError,
   formatEther,
   formatUnits,
+  isHex,
   parseEther,
+  size,
   zeroHash,
   type Address,
   type Hex,
 } from "viem";
+import { eq } from "drizzle-orm";
 import { escrowAbi } from "@/lib/chain/escrow-abi";
 import { RECEIVE_WITH_AUTHORIZATION_TYPES, usdcAbi } from "@/lib/chain/usdc-abi";
 import { resolveChainClients, type ChainClients, type ChainDeps } from "@/lib/chain/clients";
@@ -52,6 +55,17 @@ export class InsufficientUsdcError extends Error {
     this.name = "InsufficientUsdcError";
   }
 }
+
+/** Malformed relay input (bad kind / signature / hash); nothing was sent. Routes should map it to 400. */
+export class RelayInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RelayInputError";
+  }
+}
+
+/** Smallest accepted relayed signature: 65-byte ECDSA (ERC-1271 signatures may be longer). */
+export const MIN_SIGNATURE_BYTES = 65;
 
 export type RelayAction =
   | "createJob"
@@ -156,8 +170,18 @@ type EscrowWrite =
   | { functionName: "decline" | "approve" | "requestRevision" | "refund"; args: readonly [Hex, bigint, Hex] }
   | { functionName: "claim" | "settleSplit"; args: readonly [Hex] };
 
-/** Funds check, simulate (decodes reverts without spending gas), send, wait for receipt. */
-async function sendEscrowTx(c: ChainClients, action: RelayAction, call: EscrowWrite): Promise<Hex> {
+/**
+ * Funds check, simulate (decodes reverts without spending gas), send, wait for receipt.
+ * `beforeBroadcast` runs after a successful simulation and right before the tx is broadcast; if it throws,
+ * nothing is sent. Errors before broadcast: RelayerUnderfundedError, ChainActionError (simulate), or the hook's
+ * error. Errors after broadcast (writeContract / receipt) may mean the tx still lands on-chain.
+ */
+async function sendEscrowTx(
+  c: ChainClients,
+  action: RelayAction,
+  call: EscrowWrite,
+  beforeBroadcast?: () => Promise<void>,
+): Promise<Hex> {
   await assertRelayerFunded(c);
   const account = c.relayerClient.account;
   return withRelayerLock(account.address, async () => {
@@ -172,6 +196,7 @@ async function sendEscrowTx(c: ChainClients, action: RelayAction, call: EscrowWr
     } catch (err) {
       throw toChainActionError(err, action);
     }
+    await beforeBroadcast?.();
     const hash = await c.relayerClient.writeContract(request as Parameters<typeof c.relayerClient.writeContract>[0]);
     const receipt = await c.publicClient.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") throw new ChainActionError("Reverted", action);
@@ -217,7 +242,7 @@ export async function createJob(
   const c = await resolveChainClients(deps);
   const database = deps.db ?? getDb();
   const buyer = await getUserAccount(userId, database);
-  const terms = toTerms(input, buyer.address);
+  const terms = toTerms(input, buyer.address, { relayer: c.relayerClient.account.address, escrow: c.escrow });
 
   const now = await latestTimestamp(c);
   if (terms.deliverDeadline <= now) throw new TermsError("Hạn giao bài phải ở tương lai.");
@@ -248,18 +273,29 @@ export async function createJob(
     },
   });
 
-  const txHash = await sendEscrowTx(c, "createJob", {
-    functionName: "createJob",
-    args: [jobId, buyer.address, terms, validAfter, validBefore, usdcSig],
-  });
+  // The job row is written after simulation succeeds and BEFORE broadcast (createTx null), so a crash or a
+  // receipt timeout after broadcast never leaves funded escrow the app doesn't know about; such rows are
+  // reconciled with getJob(). Pre-send failures (USDC/relayer balance, simulate revert, insert error) send
+  // nothing and leave no row.
+  const txHash = await sendEscrowTx(
+    c,
+    "createJob",
+    {
+      functionName: "createJob",
+      args: [jobId, buyer.address, terms, validAfter, validBefore, usdcSig],
+    },
+    async () => {
+      await database.insert(job).values({
+        id: jobId,
+        userId,
+        freelancerAddress: terms.freelancer,
+        candidateUrl: input.candidateUrl ?? null,
+        createTx: null,
+      });
+    },
+  );
 
-  await database.insert(job).values({
-    id: jobId,
-    userId,
-    freelancerAddress: terms.freelancer,
-    candidateUrl: input.candidateUrl ?? null,
-    createTx: txHash,
-  });
+  await database.update(job).set({ createTx: txHash }).where(eq(job.id, jobId));
 
   return { jobId, txHash };
 }
@@ -305,6 +341,19 @@ export async function relayFreelancerAction(
   sig: Hex,
   deps: RelayDeps = {},
 ): Promise<Hex> {
+  if (kind !== "submit" && kind !== "decline") {
+    throw new RelayInputError(`Thao tác freelancer không hợp lệ: ${String(kind)} (chỉ chấp nhận submit hoặc decline).`);
+  }
+  // An empty sig would hit the contract's direct-call path (msg.sender == freelancer), where msg.sender is the
+  // relayer: never forward one. >= 65 bytes admits ECDSA (65) and longer ERC-1271 smart-wallet signatures.
+  if (typeof sig !== "string" || !isHex(sig, { strict: true }) || size(sig) < MIN_SIGNATURE_BYTES) {
+    throw new RelayInputError("Chữ ký không hợp lệ (cần chữ ký EIP-712 của ví freelancer).");
+  }
+  if (kind === "submit" && (typeof contentHash !== "string" || !isHex(contentHash, { strict: true }) || size(contentHash) !== 32)) {
+    throw new RelayInputError("Mã băm nội dung bài nộp không hợp lệ (cần 32 byte).");
+  }
+  if (typeof deadline !== "bigint") throw new RelayInputError("Hạn chữ ký không hợp lệ.");
+
   const c = await resolveChainClients(deps);
   if (kind === "submit") {
     return sendEscrowTx(c, "submit", { functionName: "submit", args: [jobId, contentHash, deadline, sig] });

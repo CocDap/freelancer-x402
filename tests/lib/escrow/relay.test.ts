@@ -25,6 +25,7 @@ import { TermsError, jobNonce, newJobId, toTerms, type JobTermsInput } from "@/l
 import {
   ChainActionError,
   InsufficientUsdcError,
+  RelayInputError,
   RelayerUnderfundedError,
   buyerAction,
   createJob,
@@ -143,7 +144,13 @@ describe("typed data / terms", () => {
     } catch (e) {
       expect((e as Error).message).toMatch(/người thuê/);
     }
-    const ok = toTerms({ ...input, amountUsdc: "1.234567" }, buyer);
+    const relayer = privateKeyToAccount(chain.ctx.relayerKey).address;
+    const forbidden = { relayer, escrow: chain.ctx.escrow };
+    expect(() => toTerms({ ...input, freelancer: relayer }, buyer, forbidden)).toThrow(/relayer/);
+    expect(() => toTerms({ ...input, freelancer: chain.ctx.escrow.toLowerCase() as Address }, buyer, forbidden)).toThrow(
+      /escrow/,
+    );
+    const ok = toTerms({ ...input, amountUsdc: "1.234567" }, buyer, forbidden);
     expect(ok.amount).toBe(1_234_567n);
     expect(ok.reviewWindow).toBe(7 * DAY);
     expect(ok.revisionWindow).toBe(3 * DAY);
@@ -204,6 +211,7 @@ describe("relay", () => {
 
     const err = await createJob(buyer.userId, input, { db, relayerClient }).catch((e) => e);
     expect(err).toBeInstanceOf(RelayerUnderfundedError);
+    expect(await db.select().from(job)).toHaveLength(0);
     expect(await chain.publicClient.getTransactionCount({ address: poor.address })).toBe(0);
   });
 
@@ -328,5 +336,76 @@ describe("relay", () => {
     expect(err).toBeInstanceOf(ChainActionError);
     expect(err.code).toBe("BadSigner");
     expect((await getJob(jobId)).stateName).toBe("Funded");
+  });
+
+  it("createJob persists the job row before broadcast; a post-broadcast failure keeps it (createTx null)", async () => {
+    const buyer = await newBuyer("100");
+    const { input, freelancer } = await terms();
+    // Receipt wait fails after the tx was broadcast (e.g. RPC timeout).
+    const flaky = {
+      ...chain.publicClient,
+      waitForTransactionReceipt: async () => {
+        throw new Error("receipt timeout");
+      },
+    } as unknown as typeof chain.publicClient;
+
+    await expect(createJob(buyer.userId, input, { db, publicClient: flaky })).rejects.toThrow(/receipt timeout/);
+
+    const rows = await db.select().from(job);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: buyer.userId, freelancerAddress: freelancer.address, createTx: null });
+    const view = await getJob(rows[0].id as Hex);
+    expect(view.stateName).toBe("Funded");
+    expect(view.buyer).toBe(buyer.address);
+  });
+
+  it("createJob pre-send failures leave no job row and send nothing", async () => {
+    const buyer = await newBuyer("100");
+    const relayer = privateKeyToAccount(chain.ctx.relayerKey).address;
+    const nonceBefore = await chain.publicClient.getTransactionCount({ address: relayer });
+
+    // simulate revert: point the relay at a contract that is not the escrow
+    const { input } = await terms();
+    const simErr = await createJob(buyer.userId, input, { db, escrow: chain.ctx.usdc }).catch((e) => e);
+    expect(simErr).toBeInstanceOf(ChainActionError);
+
+    // freelancer == relayer / escrow is rejected before any chain call
+    const asRelayer = await createJob(buyer.userId, { ...input, freelancer: relayer }, { db }).catch((e) => e);
+    expect(asRelayer).toBeInstanceOf(TermsError);
+    expect(asRelayer.message).toMatch(/relayer/);
+    const asEscrow = await createJob(buyer.userId, { ...input, freelancer: chain.ctx.escrow }, { db }).catch((e) => e);
+    expect(asEscrow).toBeInstanceOf(TermsError);
+
+    expect(await db.select().from(job)).toHaveLength(0);
+    expect(await chain.publicClient.getTransactionCount({ address: relayer })).toBe(nonceBefore);
+    expect(await chain.usdcBalance(buyer.address)).toBe(parseUnits("100", 6));
+  });
+
+  it("relayFreelancerAction refuses empty/short signatures (no direct-call path via the relayer)", async () => {
+    const buyer = await newBuyer("100");
+    const { input } = await terms();
+    const { jobId } = await createJob(buyer.userId, input, { db });
+    const relayer = privateKeyToAccount(chain.ctx.relayerKey).address;
+    const nonceBefore = await chain.publicClient.getTransactionCount({ address: relayer });
+    const deadline = (await chain.latestTimestamp()) + 600n;
+
+    for (const sig of ["0x", "0x1234", `0x${"ab".repeat(64)}`, "not-hex"] as Hex[]) {
+      const err = await relayFreelancerAction(jobId, "submit", contentHash, deadline, sig).catch((e) => e);
+      expect(err).toBeInstanceOf(RelayInputError);
+      const err2 = await relayFreelancerAction(jobId, "decline", zeroHash, deadline, sig).catch((e) => e);
+      expect(err2).toBeInstanceOf(RelayInputError);
+    }
+    expect(await chain.publicClient.getTransactionCount({ address: relayer })).toBe(nonceBefore);
+    expect((await getJob(jobId)).stateName).toBe("Funded");
+  });
+
+  it("relayFreelancerAction rejects unknown kinds", async () => {
+    const sig = `0x${"ab".repeat(65)}` as Hex;
+    const jobId = newJobId(privateKeyToAccount(generatePrivateKey()).address);
+    for (const kind of ["approve", "claim", "", undefined]) {
+      const err = await relayFreelancerAction(jobId, kind as "submit", contentHash, 1n, sig).catch((e) => e);
+      expect(err).toBeInstanceOf(RelayInputError);
+      expect(err.message).toMatch(/submit hoặc decline/);
+    }
   });
 });
