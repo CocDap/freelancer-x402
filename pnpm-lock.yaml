@@ -20,6 +20,9 @@ importers:
       '@x402/evm':
         specifier: 2.29.0
         version: 2.29.0(typescript@5.9.3)
+      '@x402/fetch':
+        specifier: 2.29.0
+        version: 2.29.0
       '@x402/next':
         specifier: 2.29.0
         version: 2.29.0(next@16.4.4(@babel/core@7.29.7)(@types/node@20.19.43)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(typescript@5.9.3)
@@ -1559,6 +1562,9 @@ packages:
 
   '@x402/extensions@2.29.0':
     resolution: {integrity: sha512-FCpjZ6QR6ZtHTRZBV7VHMt7tc66LnTrpKDERiL3atXlLu4PlmgiulHt9PWE+Ktm5iUbXr3dAYZu2e7XrVd/XgA==, tarball: https://registry.npmjs.org/@x402/extensions/-/extensions-2.29.0.tgz}
+
+  '@x402/fetch@2.29.0':
+    resolution: {integrity: sha512-ym/+6Cg7uUqScrE/pCV0sfmKecX46KTk5B/VKyJo579Xn1Z6dq2KiLd04rTvvO2xldLKKluU/3SqpDIgkp6T9Q==, tarball: https://registry.npmjs.org/@x402/fetch/-/fetch-2.29.0.tgz}
 
   '@x402/next@2.29.0':
     resolution: {integrity: sha512-t5PQZxQnCP1K1mtonGKgO7bQNxjES3XdesK24UJy8n9is3l+rpncF1DSlOEPNR+9MuSqlO4jcdmujlUjJ2wvdw==, tarball: https://registry.npmjs.org/@x402/next/-/next-2.29.0.tgz}
@@ -4423,6 +4429,10 @@ snapshots:
       - ethers
       - typescript
       - utf-8-validate
+
+  '@x402/fetch@2.29.0':
+    dependencies:
+      '@x402/core': 2.29.0
 
   '@x402/next@2.29.0(next@16.4.4(@babel/core@7.29.7)(@types/node@20.19.43)(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(typescript@5.9.3)':
     dependencies:
