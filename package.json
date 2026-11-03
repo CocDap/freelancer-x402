@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:contracts": "cd contracts && forge test"
+    "test:contracts": "cd contracts && forge test",
+    "abi": "cd contracts && forge build && cd .. && node scripts/gen-abi.mjs"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",
