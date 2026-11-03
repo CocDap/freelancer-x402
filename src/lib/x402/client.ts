@@ -1,3 +1,4 @@
+import "server-only";
 import { randomUUID } from "node:crypto";
 import type { Address, PrivateKeyAccount } from "viem";
 import { formatUnits, parseUnits } from "viem";

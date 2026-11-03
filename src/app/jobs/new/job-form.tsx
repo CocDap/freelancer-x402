@@ -48,15 +48,16 @@ export function JobForm({ candidateUrl }: { candidateUrl: string }) {
         />
         {err(fe.deadline)}
       </label>
+      <p className="text-xs text-zinc-500">Có thể nhập số lẻ (vd 0.001 ngày ≈ 86 giây) để thử nghiệm.</p>
       <div className="grid grid-cols-3 gap-3">
         <label className="flex flex-col gap-1 text-sm">
           Số ngày duyệt
-          <input name="reviewDays" type="number" min="1" step="1" required defaultValue={v.reviewDays ?? "7"} className={input} />
+          <input name="reviewDays" type="number" min="0.001" step="any" required defaultValue={v.reviewDays ?? "7"} className={input} />
           {err(fe.reviewDays)}
         </label>
         <label className="flex flex-col gap-1 text-sm">
           Số ngày sửa
-          <input name="revisionDays" type="number" min="1" step="1" required defaultValue={v.revisionDays ?? "3"} className={input} />
+          <input name="revisionDays" type="number" min="0.001" step="any" required defaultValue={v.revisionDays ?? "3"} className={input} />
           {err(fe.revisionDays)}
         </label>
         <label className="flex flex-col gap-1 text-sm">

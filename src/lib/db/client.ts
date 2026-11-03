@@ -1,3 +1,4 @@
+import "server-only";
 import { createClient } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import { getEnv } from "@/lib/env";

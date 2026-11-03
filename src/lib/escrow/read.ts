@@ -1,3 +1,4 @@
+import "server-only";
 import { formatUnits, type ContractFunctionReturnType, type Hex } from "viem";
 import { escrowAbi } from "@/lib/chain/escrow-abi";
 import { resolveChainClients, type ChainDeps } from "@/lib/chain/clients";

@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { withX402 } from "@x402/next";
 import { parseSearchInput, searchHandler } from "@/lib/search/handler";
-import { buildSearchRouteConfig, getResourceServer, SEARCH_ROUTE_PATTERN } from "@/lib/x402/server";
+import { buildSearchRouteConfig, getResourceServer } from "@/lib/x402/server";
 
 type Handler = (request: NextRequest) => Promise<NextResponse>;
 let paid: Handler | undefined;
@@ -10,7 +10,8 @@ let paid: Handler | undefined;
 function getPaidHandler(): Handler {
   paid ??= withX402(
     searchHandler,
-    { [SEARCH_ROUTE_PATTERN]: buildSearchRouteConfig() },
+    // Bare RouteConfig (not a path-pattern map): every request through this wrapper is paid, whatever the path.
+    buildSearchRouteConfig(),
     getResourceServer(),
   ) as Handler;
   return paid;

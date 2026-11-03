@@ -1,3 +1,4 @@
+import "server-only";
 // Server-side only (reads RELAYER_PRIVATE_KEY via getEnv).
 import {
   createPublicClient,

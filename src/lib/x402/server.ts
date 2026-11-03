@@ -1,3 +1,4 @@
+import "server-only";
 import { HTTPFacilitatorClient, x402ResourceServer, type RouteConfig } from "@x402/core/server";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { parseUnits } from "viem";
@@ -77,6 +78,3 @@ export function buildSearchRouteConfig(): RouteConfig {
     mimeType: "application/json",
   };
 }
-
-/** Route pattern as served; `[source]` matches one path segment (verified in @x402/core route compiler). */
-export const SEARCH_ROUTE_PATTERN = "/api/x402/search/[source]";
