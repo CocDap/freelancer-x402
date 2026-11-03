@@ -8,18 +8,20 @@ import {
   formatUnits,
   isHex,
   parseEther,
+  parseUnits,
   size,
   zeroHash,
   type Address,
   type Hex,
 } from "viem";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { escrowAbi } from "@/lib/chain/escrow-abi";
 import { RECEIVE_WITH_AUTHORIZATION_TYPES, usdcAbi } from "@/lib/chain/usdc-abi";
 import { resolveChainClients, type ChainClients, type ChainDeps } from "@/lib/chain/clients";
 import { getDb, type Db } from "@/lib/db/client";
-import { job } from "@/lib/db/schema";
-import { getUserAccount } from "@/lib/wallet/user-wallet";
+import { job, wallet } from "@/lib/db/schema";
+import { getEnv } from "@/lib/env";
+import { getOrCreateUserWallet, getUserAccount } from "@/lib/wallet/user-wallet";
 import { ACTION_TYPES, ActionKind, actionMessage, escrowDomain } from "./typed-data";
 import { TermsError, USDC_DECIMALS, jobNonce, newJobId, toTerms, type JobTermsInput } from "./terms";
 import { getJob, type BuyerActionKind, type FreelancerActionKind } from "./read";
@@ -394,6 +396,76 @@ export async function relayFreelancerAction(
     return sendEscrowTx(c, "submit", { functionName: "submit", args: [jobId, contentHash, deadline, sig] }, beforeBroadcast);
   }
   return sendEscrowTx(c, "decline", { functionName: "decline", args: [jobId, deadline, sig] }, beforeBroadcast);
+}
+
+export type WelcomeGrantResult =
+  | { status: "sent"; txHash: Hex }
+  | { status: "skipped"; reason: "disabled" | "already-granted" | "relayer-low-usdc" };
+
+/**
+ * Sends the one-time welcome grant (WELCOME_GRANT_USDC, default 0.3) from the relayer to the user's wallet.
+ * At most once per wallet: the row is claimed (`welcome_grant_tx` null -> "pending") before anything is sent,
+ * so concurrent callers can't double-pay. A failure before broadcast releases the claim for a later retry;
+ * after broadcast the tx hash is stored and the grant is never re-sent. A relayer without enough USDC is a
+ * skip (logged), not an error. Throws RelayerUnderfundedError when the relayer lacks AVAX for gas.
+ */
+export async function grantWelcomeUsdc(
+  userId: string,
+  deps: RelayDeps & { amountUsdc?: number } = {},
+): Promise<WelcomeGrantResult> {
+  const amountUsdc = deps.amountUsdc ?? getEnv().WELCOME_GRANT_USDC;
+  if (amountUsdc <= 0) return { status: "skipped", reason: "disabled" };
+
+  const database = deps.db ?? getDb();
+  const to = await getOrCreateUserWallet(userId, database);
+  const [row] = await database.select({ tx: wallet.welcomeGrantTx }).from(wallet).where(eq(wallet.userId, userId));
+  if (row?.tx) return { status: "skipped", reason: "already-granted" };
+
+  const c = await resolveChainClients(deps);
+  const value = parseUnits(String(amountUsdc), USDC_DECIMALS);
+  const account = c.relayerClient.account;
+  const relayerUsdc = await c.publicClient.readContract({
+    address: c.usdc,
+    abi: usdcAbi,
+    functionName: "balanceOf",
+    args: [account.address],
+  });
+  if (relayerUsdc < value) {
+    console.warn(
+      `[relay] welcome grant skipped: relayer has ${formatUnits(relayerUsdc, USDC_DECIMALS)} USDC, needs ${amountUsdc}`,
+    );
+    return { status: "skipped", reason: "relayer-low-usdc" };
+  }
+  await assertRelayerFunded(c);
+
+  const claimed = await database
+    .update(wallet)
+    .set({ welcomeGrantTx: "pending" })
+    .where(and(eq(wallet.userId, userId), isNull(wallet.welcomeGrantTx)))
+    .returning({ userId: wallet.userId });
+  if (claimed.length === 0) return { status: "skipped", reason: "already-granted" };
+
+  let hash: Hex | undefined;
+  try {
+    return await withRelayerLock(account.address, async () => {
+      const { request } = await c.publicClient.simulateContract({
+        address: c.usdc,
+        abi: usdcAbi,
+        functionName: "transfer",
+        args: [to, value],
+        account,
+      });
+      hash = await c.relayerClient.writeContract(request);
+      await database.update(wallet).set({ welcomeGrantTx: hash }).where(eq(wallet.userId, userId));
+      const receipt = await c.publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") throw new Error(`welcome grant tx ${hash} reverted`);
+      return { status: "sent", txHash: hash } as const;
+    });
+  } catch (err) {
+    // Not broadcast: release the claim so a later call can retry. Broadcast: keep the hash, never re-send.
+    if (!hash) await database.update(wallet).set({ welcomeGrantTx: null }).where(eq(wallet.userId, userId));
+    throw err;
+  }
 }
 
 /** Permissionless settlement: `claim` when Submitted, `settleSplit` when RevisionRequested. */

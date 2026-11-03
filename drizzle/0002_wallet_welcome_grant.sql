@@ -1,0 +1,1 @@
+ALTER TABLE `wallet` ADD `welcome_grant_tx` text;

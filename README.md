@@ -53,6 +53,7 @@ Tất cả đều bắt buộc (trừ `DATABASE_AUTH_TOKEN`). Mã nguồn không
 | `ESCROW_ADDRESS` | không | Địa chỉ `FreelanceEscrow` sau khi deploy. |
 | `RELAYER_PRIVATE_KEY` | có | Private key (0x + 64 hex) của ví relayer trả gas. |
 | `RELAYER_MIN_AVAX` | không | Số AVAX tối thiểu của relayer; thấp hơn thì app từ chối gửi giao dịch (không chỉ cảnh báo), giá trị gợi ý `0.05`. |
+| `WELCOME_GRANT_USDC` | không | USDC relayer tặng mỗi ví mới đúng một lần (mặc định `0.3`, `0` = tắt). Relayer phải có USDC; thiếu thì bỏ qua và trang Ví thử lại sau. |
 | `APP_URL` | không | URL gốc của app, ví dụ `http://localhost:3000` hoặc URL Vercel. |
 | `WALLET_ENCRYPTION_KEY` | có | 32 byte base64 để mã hoá key ví người dùng: `openssl rand -base64 32`. |
 | `AUTH_SECRET` | có | Secret cho better-auth: `openssl rand -base64 32`. |
@@ -80,7 +81,7 @@ Escrow không có owner nên ví nào có AVAX Fuji cũng deploy được; có t
 - AVAX Fuji (cho relayer và deployer): https://core.app/tools/testnet-faucet/
 - USDC Fuji (cho ví người thuê, và để thử x402): https://faucet.circle.com/ (chọn Avalanche Fuji). Địa chỉ ví người thuê hiện ở trang Ví của app.
 
-Ví người thuê chỉ cần USDC, không cần AVAX. Ví relayer phải luôn có AVAX.
+Ví người thuê chỉ cần USDC, không cần AVAX. Ví relayer phải luôn có AVAX, và cần thêm USDC nếu bật quà chào mừng (`WELCOME_GRANT_USDC`).
 
 ## Chạy local
 

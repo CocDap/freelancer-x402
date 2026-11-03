@@ -6,6 +6,8 @@ export const wallet = sqliteTable("wallet", {
   userId: text("user_id").primaryKey(),
   address: text("address").notNull(),
   encryptedKey: text("encrypted_key").notNull(),
+  /** Welcome USDC grant: null = not sent yet, "pending" = claimed/being sent, else the transfer tx hash. */
+  welcomeGrantTx: text("welcome_grant_tx"),
 });
 
 export const search = sqliteTable("search", {

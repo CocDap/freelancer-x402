@@ -17,6 +17,8 @@ export const TEST_ENV_DEFAULTS: Record<string, string> = {
   ESCROW_ADDRESS: "0x0000000000000000000000000000000000000002",
   RELAYER_PRIVATE_KEY: "0x" + "11".repeat(32),
   RELAYER_MIN_AVAX: "0.05",
+  // Off by default so signups in tests never touch a chain; welcome-grant tests turn it on.
+  WELCOME_GRANT_USDC: "0",
   APP_URL: "http://localhost:3000",
   WALLET_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64"),
   AUTH_SECRET: "test-auth-secret-test-auth-secret",

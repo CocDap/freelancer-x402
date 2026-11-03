@@ -28,6 +28,7 @@ USDC_ADDRESS=0x5425890298aed601595a70AB815c96711a31Bc65         # USDC trên Fuj
 ESCROW_ADDRESS=0x...                        # địa chỉ FreelanceEscrow sau khi deploy
 RELAYER_PRIVATE_KEY=                        # SECRET: 0x + 64 hex, ví relayer trả gas (tạo bằng `cast wallet new`)
 RELAYER_MIN_AVAX=0.05                       # dưới mức này app từ chối gửi giao dịch (không chỉ cảnh báo)
+WELCOME_GRANT_USDC=0.3                      # USDC relayer tặng mỗi ví mới một lần; 0 = tắt. Relayer cần có USDC
 
 # --- App ---
 APP_URL=http://localhost:3000               # URL gốc; trên Vercel là URL deploy

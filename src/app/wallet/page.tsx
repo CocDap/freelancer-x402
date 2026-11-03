@@ -1,5 +1,5 @@
 import { ExternalLinkIcon, TriangleAlertIcon } from "lucide-react";
-import { connection } from "next/server";
+import { after, connection } from "next/server";
 import { Suspense } from "react";
 import { CopyButton } from "@/components/copy-button";
 import { DetailList, DetailRow, ExtLink } from "@/components/detail-list";
@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth";
 import { getChainClients } from "@/lib/chain/clients";
+import { grantWelcomeUsdc } from "@/lib/escrow/relay";
 import { usdcAbi } from "@/lib/chain/usdc-abi";
 import { CIRCLE_FAUCET_URL, formatAvax, formatUsdc, snowtraceAddress } from "@/lib/jobs/format";
 import { getUserAddress } from "@/lib/wallet/user-wallet";
@@ -18,6 +19,12 @@ async function Content() {
   await connection(); // request-time only: reads session, DB and chain
   const user = await requireUser();
   const address = await getUserAddress(user.id);
+  // Retries the one-time welcome grant if signup couldn't send it (no-op once granted).
+  after(() =>
+    grantWelcomeUsdc(user.id).catch((err: unknown) => {
+      console.error("[wallet] welcome grant failed:", err instanceof Error ? `${err.name}: ${err.message}` : "unknown");
+    }),
+  );
   const c = await getChainClients();
   const relayer = c.relayerClient.account.address;
   const [usdc, avax, relayerAvax] = await Promise.all([

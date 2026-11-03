@@ -8,6 +8,7 @@ import { redirect } from "next/navigation";
 import { getDb, type Db } from "@/lib/db/client";
 import * as schema from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
+import { grantWelcomeUsdc } from "@/lib/escrow/relay";
 import { getOrCreateUserWallet } from "@/lib/wallet/user-wallet";
 
 /** Builds a better-auth instance bound to `database` (tests pass an in-memory db). */
@@ -32,6 +33,10 @@ export function createAuth(database: Db = getDb()) {
           after: async (created) => {
             // Fast path; getUserAccount/getUserAddress recover if this fails (the hook runs after commit).
             await getOrCreateUserWallet(created.id, database);
+            // Never fails signup: on error the wallet page retries the grant later.
+            await grantWelcomeUsdc(created.id, { db: database }).catch((err: unknown) => {
+              console.error("[auth] welcome grant failed:", err instanceof Error ? `${err.name}: ${err.message}` : "unknown");
+            });
           },
         },
       },

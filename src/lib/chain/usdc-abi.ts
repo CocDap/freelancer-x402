@@ -5,6 +5,7 @@ export const usdcAbi = parseAbi([
   "function name() view returns (string)",
   "function version() view returns (string)",
   "function balanceOf(address account) view returns (uint256)",
+  "function transfer(address to, uint256 value) returns (bool)",
   "function receiveWithAuthorization(address from, address to, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)",
   // MockUSDC custom errors (real USDC reverts with strings); listed so viem can decode them.
   "error CallerMustBePayee()",

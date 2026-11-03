@@ -30,6 +30,8 @@ const schema = z.object({
   ESCROW_ADDRESS: address,
   RELAYER_PRIVATE_KEY: z.string().regex(/^0x[0-9a-fA-F]{64}$/, "must be 0x + 64 hex chars"),
   RELAYER_MIN_AVAX: amount,
+  // USDC the relayer gives each new wallet once; 0 disables. Unset or empty = 0.3.
+  WELCOME_GRANT_USDC: z.preprocess((v) => (v === "" ? undefined : v), z.coerce.number().min(0).default(0.3)),
 
   // App
   APP_URL: z.string().url(),
