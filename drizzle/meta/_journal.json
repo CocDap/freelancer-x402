@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1793676172498,
+      "tag": "0000_dusty_mac_gargan",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793676271412,
+      "tag": "0001_neat_sally_floyd",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793698911713,
+      "tag": "0002_wallet_welcome_grant",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793699884231,
+      "tag": "0003_wallet_grant_ip",
+      "breakpoints": true
+    }
+  ]
+}
