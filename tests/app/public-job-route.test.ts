@@ -125,6 +125,19 @@ describe("POST /api/public/jobs/[jobId]", () => {
     expect((await getJob(jobId)).stateName).toBe("Funded");
   });
 
+  it("job with no row in this app -> 404 for submit, decline and finalize, nothing relayed", async () => {
+    const { jobId, freelancer } = await newJob();
+    await db.delete(job).where(eq(job.id, jobId));
+    const s = await sign(freelancer, jobId, ActionKind.Submit, keccak256(toBytes(url)));
+    const res = await call(jobId, { kind: "submit", contentUrl: url, deadline: s.deadline, sig: s.sig });
+    expect(res.status).toBe(404);
+    expect(typeof (await res.json()).error).toBe("string");
+    const d = await sign(freelancer, jobId, ActionKind.Decline, zeroHash);
+    expect((await call(jobId, { kind: "decline", deadline: d.deadline, sig: d.sig })).status).toBe(404);
+    expect((await call(jobId, { kind: "finalize" })).status).toBe(404);
+    expect((await getJob(jobId)).stateName).toBe("Funded");
+  });
+
   it("bad jobId or malformed body -> 400", async () => {
     expect((await call("0x1234", { kind: "finalize" })).status).toBe(400);
     expect((await call("nope", { kind: "finalize" })).status).toBe(400);

@@ -60,6 +60,8 @@ export function FreelancerPanel(p: PanelProps) {
       router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Có lỗi xảy ra. Vui lòng thử lại.");
+      // Refresh so a retry signs with the fresh actionNonce (a failed relay may still have consumed/changed it).
+      router.refresh();
     } finally {
       setBusy(false);
     }

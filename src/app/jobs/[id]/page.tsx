@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { zeroHash } from "viem";
 import { CopyButton } from "@/components/copy-button";
 import { requireUser } from "@/lib/auth";
 import { getChainClients } from "@/lib/chain/clients";
@@ -11,10 +12,13 @@ import { getEnv } from "@/lib/env";
 import { getJob } from "@/lib/escrow/read";
 import {
   BUYER_ACTION_LABELS,
+  CONTENT_MISMATCH_WARNING,
+  contentUrlMatches,
   FINALIZE_LABELS,
   formatChainTime,
   formatUsdc,
   isJobId,
+  shortHash,
   snowtraceAddress,
   snowtraceTx,
   stateLabel,
@@ -56,6 +60,8 @@ async function Content({ params }: { params: PageProps<"/jobs/[id]">["params"] }
     ...view.availableActions.anyone.map((kind): ActionButton => ({ label: FINALIZE_LABELS[kind], run: { type: "finalize" } })),
   ];
   const publicLink = `${getEnv().APP_URL}/j/${jobId}`;
+  const contentOk = contentUrlMatches(row.contentUrl, view.contentHash);
+  const contentMismatch = view.stateName === "Submitted" && !contentOk;
   const reviewDeadline = view.submittedAt > 0n ? view.submittedAt + BigInt(view.reviewWindow) : 0n;
 
   return (
@@ -64,6 +70,9 @@ async function Content({ params }: { params: PageProps<"/jobs/[id]">["params"] }
         <p className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">Đang xác nhận / cần đối soát: giao dịch chưa được ghi nhận trên chuỗi.</p>
       ) : (
         <p className="text-lg font-medium">{stateLabel(view.stateName)}</p>
+      )}
+      {contentMismatch && (
+        <p role="alert" className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">{CONTENT_MISMATCH_WARNING}</p>
       )}
       <dl className="flex flex-col gap-2">
         <Row label="Số tiền">{view.stateName === "None" ? "—" : `${formatUsdc(view.amount)} USDC`}</Row>
@@ -76,8 +85,11 @@ async function Content({ params }: { params: PageProps<"/jobs/[id]">["params"] }
         <Row label="Hạn sửa">{formatChainTime(view.revisionDeadline)}</Row>
         <Row label="Số lần sửa">{view.stateName === "None" ? "—" : `${view.revisionCount}/${view.maxRevisions}`}</Row>
         <Row label="Link bài">
-          {row.contentUrl ? <a href={row.contentUrl} target="_blank" rel="noopener noreferrer" className="underline">{row.contentUrl}</a> : "Chưa có"}
+          {contentOk && row.contentUrl ? <a href={row.contentUrl} target="_blank" rel="noopener noreferrer" className="underline">{row.contentUrl}</a> : "Chưa có"}
         </Row>
+        {view.contentHash !== zeroHash && (
+          <Row label="Mã băm bài nộp (on-chain)"><span className="font-mono" title={view.contentHash}>{shortHash(view.contentHash)}</span></Row>
+        )}
         {row.candidateUrl && (
           <Row label="Link ứng viên"><a href={row.candidateUrl} target="_blank" rel="noopener noreferrer" className="underline">{row.candidateUrl}</a></Row>
         )}

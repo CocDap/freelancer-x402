@@ -6,7 +6,7 @@ import { getChainClients } from "@/lib/chain/clients";
 import { getDb } from "@/lib/db/client";
 import { job } from "@/lib/db/schema";
 import { getJob } from "@/lib/escrow/read";
-import { formatChainTime, formatUsdc, isJobId, snowtraceAddress, snowtraceTx, stateLabel } from "@/lib/jobs/format";
+import { CONTENT_MISMATCH_WARNING, contentUrlMatches, formatChainTime, formatUsdc, isJobId, snowtraceAddress, snowtraceTx, stateLabel } from "@/lib/jobs/format";
 import { FreelancerPanel } from "./freelancer-panel";
 import { PublicJobProviders } from "./providers";
 
@@ -43,6 +43,7 @@ async function Content({ params }: { params: PageProps<"/j/[jobId]">["params"] }
   const chainId = clients.chain.id;
   const [row] = await getDb().select().from(job).where(eq(job.id, jobId));
 
+  const contentOk = contentUrlMatches(row?.contentUrl, view.contentHash);
   const actions = view.availableActions;
   const reviewDeadline = view.submittedAt > 0n ? view.submittedAt + BigInt(view.reviewWindow) : 0n;
   const txLink = row?.createTx ? snowtraceTx(chainId, row.createTx) : null;
@@ -51,13 +52,16 @@ async function Content({ params }: { params: PageProps<"/j/[jobId]">["params"] }
   return (
     <>
       <p className="text-lg font-medium">{PUBLIC_STATE[view.stateName] ?? stateLabel(view.stateName)}</p>
+      {view.stateName === "Submitted" && !contentOk && (
+        <p role="alert" className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">{CONTENT_MISMATCH_WARNING}</p>
+      )}
       <dl className="flex flex-col gap-2">
         <Row label="Số tiền đã khoá">{formatUsdc(view.amount)} USDC</Row>
         <Row label="Ví freelancer"><span className="font-mono">{view.freelancer}</span></Row>
         <Row label="Hạn nộp bài">{formatChainTime(view.deliverDeadline)}</Row>
         {view.submittedAt > 0n && <Row label="Hạn người thuê duyệt">{formatChainTime(reviewDeadline)}</Row>}
         {view.stateName === "RevisionRequested" && <Row label="Hạn nộp bản sửa">{formatChainTime(view.revisionDeadline)}</Row>}
-        {row?.contentUrl && (
+        {contentOk && row?.contentUrl && (
           <Row label="Link bài">
             <a href={row.contentUrl} target="_blank" rel="noopener noreferrer" className="underline">{row.contentUrl}</a>
           </Row>

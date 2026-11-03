@@ -7,7 +7,8 @@ import { ChainActionError, RelayInputError, RelayerUnderfundedError, finalize, r
 import { TermsError } from "@/lib/escrow/terms";
 import { isJobId } from "@/lib/jobs/format";
 
-// Public, unauthenticated: the freelancer's signature is the only authority. Nothing is stored before the relay succeeds.
+// Public, unauthenticated: the freelancer's signature is the only authority. Only jobs created by this app
+// (a `job` row exists) are relayed, so the relayer is not a free gas station for other jobs on the escrow.
 
 const MAX_URL = 2048;
 
@@ -53,6 +54,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ jobId: 
   const input = parsed.data;
 
   try {
+    const [known] = await getDb().select({ id: job.id }).from(job).where(eq(job.id, jobId));
+    if (!known) return json({ error: "Không tìm thấy job." }, 404);
+
     if (input.kind === "finalize") {
       return json({ txHash: await finalize(jobId) }, 200);
     }
@@ -61,10 +65,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ jobId: 
     if (input.kind === "decline") {
       return json({ txHash: await relayFreelancerAction(jobId, "decline", zeroHash, deadline, sig) }, 200);
     }
-    // The hash is always recomputed here; a client-supplied hash is never trusted.
-    const txHash = await relayFreelancerAction(jobId, "submit", keccak256(toBytes(input.contentUrl)), deadline, sig);
-    // Only after the relay succeeded (signature verified on-chain). No row (job created elsewhere) -> skip.
-    await getDb().update(job).set({ contentUrl: input.contentUrl }).where(eq(job.id, jobId));
+    // The hash is always recomputed here; a client-supplied hash is never trusted. The URL is stored by the
+    // beforeBroadcast hook: after simulate succeeded (signature verified) and before the tx is sent, so a
+    // timeout after broadcast cannot lose it. The job page only shows it if its hash matches on-chain.
+    const url = input.contentUrl;
+    const txHash = await relayFreelancerAction(jobId, "submit", keccak256(toBytes(url)), deadline, sig, {}, async () => {
+      await getDb().update(job).set({ contentUrl: url }).where(eq(job.id, jobId));
+    });
     return json({ txHash }, 200);
   } catch (err) {
     if (err instanceof RelayInputError || err instanceof TermsError) return json({ error: err.message }, 400);
