@@ -41,6 +41,16 @@ export type PayingFetchOptions = {
   database?: Db;
 };
 
+/** Origin + pathname only: the query string may hold user search text. */
+function safeUrl(input: RequestInfo | URL): string {
+  try {
+    const u = new URL(input instanceof Request ? input.url : String(input));
+    return u.origin + u.pathname;
+  } catch {
+    return "unknown";
+  }
+}
+
 const toAtomic = (usdc: number) => parseUnits(usdc.toFixed(6), 6);
 
 export function createPayingFetch(opts: PayingFetchOptions): { fetch: typeof fetch; spentUsdc(): number } {
@@ -99,12 +109,25 @@ export function createPayingFetch(opts: PayingFetchOptions): { fetch: typeof fet
       reserved -= mine;
       mine = 0n;
     };
-    const lazyFetch: typeof fetch = (i, o) => globalThis.fetch(i, o);
+    // Once the payment-signature header leaves the process the seller may settle it.
+    let signed = false;
+    const lazyFetch: typeof fetch = (i, o) => {
+      if (i instanceof Request && (i.headers.has("payment-signature") || i.headers.has("x-payment"))) {
+        signed = true;
+      }
+      return globalThis.fetch(i, o);
+    };
+    const countAsSpent = () => {
+      const amount = mine;
+      release();
+      settled += amount;
+    };
     let res: Response;
     try {
       res = await wrapFetchWithPayment(lazyFetch, client)(input, init);
     } catch (e) {
-      release();
+      if (signed && mine > 0n) countAsSpent();
+      else release();
       if (budgetError) throw budgetError;
       if (e instanceof Error && e.message.includes("No network/scheme registered")) {
         throw new BudgetExceededError("scheme");
@@ -120,24 +143,28 @@ export function createPayingFetch(opts: PayingFetchOptions): { fetch: typeof fet
     } catch {
       settlement = undefined;
     }
-    if (!settlement?.success) {
-      release();
+    if (settlement?.success) {
+      const amount = mine;
+      countAsSpent();
+      if (res.ok) {
+        try {
+          await (opts.database ?? getDb()).insert(x402Payment).values({
+            id: randomUUID(),
+            searchId: opts.searchId,
+            url: safeUrl(input),
+            amountUsdc: Number(formatUnits(amount, 6)),
+            txHash: settlement.transaction || null,
+          });
+        } catch (e) {
+          console.error("x402 payment log failed:", e instanceof Error ? `${e.name}: ${e.message}` : "unknown");
+        }
+      }
       return res;
     }
-    // Funds moved: count them even if the app-level response was not OK (conservative).
-    const amount = mine;
-    release();
-    settled += amount;
-    if (res.ok) {
-      const url = input instanceof Request ? input.url : String(input);
-      await (opts.database ?? getDb()).insert(x402Payment).values({
-        id: randomUUID(),
-        searchId: opts.searchId,
-        url,
-        amountUsdc: Number(formatUnits(amount, 6)),
-        txHash: settlement.transaction || null,
-      });
-    }
+    // Only an explicit rejection (402 + payment-required) proves nothing was settled.
+    if (res.status === 402 && res.headers.has("payment-required")) release();
+    else if (signed) countAsSpent();
+    else release();
     return res;
   }
 

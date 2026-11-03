@@ -24,7 +24,7 @@ const accept = (over: Partial<Accept> = {}): Accept => ({
 });
 
 /** Hand-rolled seller: 402 without a payment-signature header, 200 + payment-response with one. */
-function stubSeller(opts: { accepts?: Accept[]; settle?: "ok" | "fail" | "missing" | "garbage"; status?: number } = {}) {
+function stubSeller(opts: { accepts?: Accept[]; settle?: "ok" | "fail" | "missing" | "garbage"; status?: number; after?: "throw" | "402" } = {}) {
   const accepts = (opts.accepts ?? [accept()]).map((a) => ({
     ...a,
     maxTimeoutSeconds: 60,
@@ -41,6 +41,11 @@ function stubSeller(opts: { accepts?: Accept[]; settle?: "ok" | "fail" | "missin
         status: 402,
         headers: { "payment-required": encodePaymentRequiredHeader(pr as never), "content-type": "application/json" },
       });
+    }
+    if (opts.after === "throw") throw new Error("network down");
+    if (opts.after === "402") {
+      const pr = { x402Version: 2, error: "invalid payment", resource: { url: req.url }, accepts };
+      return new Response("{}", { status: 402, headers: { "payment-required": encodePaymentRequiredHeader(pr as never) } });
     }
     const headers: Record<string, string> = {};
     const mode = opts.settle ?? "ok";
@@ -98,7 +103,7 @@ describe("createPayingFetch", () => {
     expect(signSpy).toHaveBeenCalledTimes(1);
     const r = await rows();
     expect(r).toHaveLength(1);
-    expect(r[0]).toMatchObject({ searchId: "s1", amountUsdc: 0.01, txHash: "0xabc123", url: URL_ });
+    expect(r[0]).toMatchObject({ searchId: "s1", amountUsdc: 0.01, txHash: "0xabc123", url: "http://seller.test/api/x402/search/linkedin" });
   });
 
   it("rejects price above per-call cap without signing", async () => {
@@ -159,22 +164,60 @@ describe("createPayingFetch", () => {
     expect(await rows()).toHaveLength(2);
   });
 
-  it.each(["fail", "missing", "garbage"] as const)("no row and no spend when settlement is %s", async (settle) => {
+  it.each(["fail", "missing", "garbage"] as const)("no row but spend counted when settlement is %s", async (settle) => {
     stubSeller({ settle });
     const p = make();
     await p.fetch(URL_);
-    expect(p.spentUsdc()).toBe(0);
+    expect(p.spentUsdc()).toBe(0.01);
     expect(await rows()).toHaveLength(0);
   });
 
-  it("releases reservation when the paid request is non-2xx", async () => {
-    stubSeller({ settle: "missing", status: 502 });
-    const p = make({ maxPerSearchUsdc: 0.01 });
+  it("counts a settled-but-non-OK response without a row", async () => {
+    stubSeller({ settle: "ok", status: 502 });
+    const p = make();
     const res = await p.fetch(URL_);
     expect(res.status).toBe(502);
-    // reservation released: a second attempt is not blocked by per_search
-    const res2 = await p.fetch(URL_);
-    expect(res2.status).toBe(502);
+    expect(p.spentUsdc()).toBe(0.01);
     expect(await rows()).toHaveLength(0);
+  });
+
+  it("explicit 402 after payment releases the reservation", async () => {
+    stubSeller({ after: "402" });
+    const p = make({ maxPerSearchUsdc: 0.01 });
+    const res = await p.fetch(URL_);
+    expect(res.status).toBe(402);
+    expect(p.spentUsdc()).toBe(0);
+    stubSeller();
+    expect((await p.fetch(URL_)).status).toBe(200);
+  });
+
+  it("thrown error after signing keeps amount counted", async () => {
+    stubSeller({ after: "throw" });
+    const p = make({ maxPerSearchUsdc: 0.01 });
+    await expect(p.fetch(URL_)).rejects.toThrow("network down");
+    expect(p.spentUsdc()).toBe(0.01);
+    stubSeller();
+    const err = await p.fetch(URL_).catch((e) => e);
+    expect(err).toBeInstanceOf(BudgetExceededError);
+    expect(await rows()).toHaveLength(0);
+  });
+
+  it("failure before signing releases the reservation", async () => {
+    stubSeller();
+    const p = make({ maxPerSearchUsdc: 0.01 });
+    signSpy.mockRejectedValueOnce(new Error("hsm down"));
+    await expect(p.fetch(URL_)).rejects.toThrow();
+    expect(p.spentUsdc()).toBe(0);
+    expect((await p.fetch(URL_)).status).toBe(200);
+    expect(p.spentUsdc()).toBe(0.01);
+  });
+
+  it("db insert failure still returns the response and keeps spend", async () => {
+    stubSeller();
+    const broken = { insert: () => { throw new Error("db down"); } } as unknown as Db;
+    const p = make({ database: broken });
+    const res = await p.fetch(URL_);
+    expect(res.status).toBe(200);
+    expect(p.spentUsdc()).toBe(0.01);
   });
 });
