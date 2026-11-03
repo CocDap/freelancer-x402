@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { NavLinks, StaticNavLinks } from "./nav-links";
 import { ThemeToggle } from "./theme-toggle";
+import { UserMenu } from "./user-menu";
 
 export function AppHeader() {
   return (
@@ -16,6 +17,9 @@ export function AppHeader() {
           <NavLinks />
         </Suspense>
         <ThemeToggle />
+        <Suspense fallback={null}>
+          <UserMenu />
+        </Suspense>
       </div>
     </header>
   );
