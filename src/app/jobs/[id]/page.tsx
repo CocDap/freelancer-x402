@@ -1,9 +1,18 @@
 import { and, eq } from "drizzle-orm";
+import { ArrowLeftIcon, TriangleAlertIcon } from "lucide-react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { zeroHash } from "viem";
 import { CopyButton } from "@/components/copy-button";
+import { DetailList, DetailRow, ExtLink } from "@/components/detail-list";
+import { JobStatusBadge } from "@/components/job-status-badge";
+import { LoadingBlock } from "@/components/loading";
+import { PageHeader, PageShell } from "@/components/page-header";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth";
 import { getChainClients } from "@/lib/chain/clients";
 import { db } from "@/lib/db/client";
@@ -25,22 +34,7 @@ import {
 } from "@/lib/jobs/format";
 import { JobActions, type ActionButton } from "./job-actions";
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-4">
-      <dt className="w-44 shrink-0 text-sm text-zinc-500">{label}</dt>
-      <dd className="min-w-0 break-all text-sm">{children}</dd>
-    </div>
-  );
-}
-
-function ExtLink({ href, children }: { href: string | null; children: React.ReactNode }) {
-  return href ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" className="underline">{children}</a>
-  ) : (
-    <>{children}</>
-  );
-}
+const DAY = 86_400;
 
 async function Content({ params }: { params: PageProps<"/jobs/[id]">["params"] }) {
   await connection(); // request-time only: reads session, DB and chain
@@ -54,10 +48,33 @@ async function Content({ params }: { params: PageProps<"/jobs/[id]">["params"] }
   const [view, clients] = await Promise.all([getJob(jobId), getChainClients()]);
   const chainId = clients.chain.id;
   const reconcile = view.stateName === "None" && !row.createTx;
+  const amount = `${formatUsdc(view.amount)} USDC`;
+  const revisionDays = Math.round((view.revisionWindow / DAY) * 100) / 100;
+
+  const BUYER_CONFIRM: Record<keyof typeof BUYER_ACTION_LABELS, Pick<ActionButton, "confirm" | "variant">> = {
+    approve: { confirm: `Trả ${amount} cho freelancer. Không hoàn tác được.` },
+    requestRevision: {
+      confirm: `Freelancer có ${revisionDays} ngày để nộp lại (đã dùng ${view.revisionCount}/${view.maxRevisions} lần sửa). Quá hạn thì chia đôi 50/50.`,
+      variant: "outline",
+    },
+    refund: { confirm: `Hoàn ${amount} về ví của bạn và kết thúc job.`, variant: "destructive" },
+  };
+  const FINALIZE_CONFIRM: Record<keyof typeof FINALIZE_LABELS, string> = {
+    claim: `Quá hạn duyệt: ${amount} được trả cho freelancer.`,
+    settleSplit: `Quá hạn sửa: ${amount} được chia đôi giữa bạn và freelancer.`,
+  };
 
   const buttons: ActionButton[] = [
-    ...view.availableActions.buyer.map((kind): ActionButton => ({ label: BUYER_ACTION_LABELS[kind], run: { type: "buyer", kind } })),
-    ...view.availableActions.anyone.map((kind): ActionButton => ({ label: FINALIZE_LABELS[kind], run: { type: "finalize" } })),
+    ...view.availableActions.buyer.map((kind): ActionButton => ({
+      label: BUYER_ACTION_LABELS[kind],
+      ...BUYER_CONFIRM[kind],
+      run: { type: "buyer", kind },
+    })),
+    ...view.availableActions.anyone.map((kind): ActionButton => ({
+      label: FINALIZE_LABELS[kind],
+      confirm: FINALIZE_CONFIRM[kind],
+      run: { type: "finalize" },
+    })),
   ];
   const publicLink = `${getEnv().APP_URL}/j/${jobId}`;
   const contentOk = contentUrlMatches(row.contentUrl, view.contentHash);
@@ -66,52 +83,94 @@ async function Content({ params }: { params: PageProps<"/jobs/[id]">["params"] }
 
   return (
     <>
-      {reconcile ? (
-        <p className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">Đang xác nhận / cần đối soát: giao dịch chưa được ghi nhận trên chuỗi.</p>
-      ) : (
-        <p className="text-lg font-medium">{stateLabel(view.stateName)}</p>
+      {reconcile && (
+        <Alert variant="warning">
+          <TriangleAlertIcon />
+          <AlertDescription>Đang xác nhận / cần đối soát: giao dịch chưa được ghi nhận trên chuỗi.</AlertDescription>
+        </Alert>
       )}
       {contentMismatch && (
-        <p role="alert" className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">{CONTENT_MISMATCH_WARNING}</p>
+        <Alert variant="warning">
+          <TriangleAlertIcon />
+          <AlertDescription>{CONTENT_MISMATCH_WARNING}</AlertDescription>
+        </Alert>
       )}
-      <dl className="flex flex-col gap-2">
-        <Row label="Số tiền">{view.stateName === "None" ? "—" : `${formatUsdc(view.amount)} USDC`}</Row>
-        <Row label="Freelancer">
-          <span className="font-mono"><ExtLink href={snowtraceAddress(chainId, row.freelancerAddress)}>{row.freelancerAddress}</ExtLink></span>
-        </Row>
-        <Row label="Hạn nộp">{formatChainTime(view.deliverDeadline)}</Row>
-        <Row label="Nộp bài lúc">{formatChainTime(view.submittedAt)}</Row>
-        <Row label="Hạn duyệt">{formatChainTime(reviewDeadline)}</Row>
-        <Row label="Hạn sửa">{formatChainTime(view.revisionDeadline)}</Row>
-        <Row label="Số lần sửa">{view.stateName === "None" ? "—" : `${view.revisionCount}/${view.maxRevisions}`}</Row>
-        <Row label="Link bài">
-          {contentOk && row.contentUrl ? <a href={row.contentUrl} target="_blank" rel="noopener noreferrer" className="underline">{row.contentUrl}</a> : "Chưa có"}
-        </Row>
-        {view.contentHash !== zeroHash && (
-          <Row label="Mã băm bài nộp (on-chain)"><span className="font-mono" title={view.contentHash}>{shortHash(view.contentHash)}</span></Row>
+
+      <Card>
+        <CardHeader>
+          <CardDescription>Số tiền trong escrow</CardDescription>
+          <CardTitle className="font-mono text-3xl font-semibold tabular-nums">
+            {view.stateName === "None" ? "—" : amount}
+          </CardTitle>
+          {!reconcile && (
+            <div className="pt-1">
+              <JobStatusBadge stateName={view.stateName} label={stateLabel(view.stateName)} />
+            </div>
+          )}
+        </CardHeader>
+        <CardContent>
+          <DetailList>
+            <DetailRow label="Freelancer">
+              <span className="font-mono">
+                <ExtLink href={snowtraceAddress(chainId, row.freelancerAddress)}>{row.freelancerAddress}</ExtLink>
+              </span>
+            </DetailRow>
+            <DetailRow label="Hạn nộp">{formatChainTime(view.deliverDeadline)}</DetailRow>
+            <DetailRow label="Nộp bài lúc">{formatChainTime(view.submittedAt)}</DetailRow>
+            <DetailRow label="Hạn duyệt">{formatChainTime(reviewDeadline)}</DetailRow>
+            <DetailRow label="Hạn sửa">{formatChainTime(view.revisionDeadline)}</DetailRow>
+            <DetailRow label="Số lần sửa">{view.stateName === "None" ? "—" : `${view.revisionCount}/${view.maxRevisions}`}</DetailRow>
+            <DetailRow label="Link bài">
+              {contentOk && row.contentUrl ? <ExtLink href={row.contentUrl}>{row.contentUrl}</ExtLink> : <span className="text-muted-foreground">Chưa có</span>}
+            </DetailRow>
+            {view.contentHash !== zeroHash && (
+              <DetailRow label="Mã băm bài nộp (on-chain)">
+                <span className="font-mono" title={view.contentHash}>{shortHash(view.contentHash)}</span>
+              </DetailRow>
+            )}
+            {row.candidateUrl && (
+              <DetailRow label="Link ứng viên"><ExtLink href={row.candidateUrl}>{row.candidateUrl}</ExtLink></DetailRow>
+            )}
+            <DetailRow label="Giao dịch tạo job">
+              {row.createTx ? <span className="font-mono"><ExtLink href={snowtraceTx(chainId, row.createTx)}>{shortHash(row.createTx, 10, 8)}</ExtLink></span> : "—"}
+            </DetailRow>
+          </DetailList>
+        </CardContent>
+        {buttons.length > 0 && (
+          <CardFooter>
+            <JobActions jobId={jobId} buttons={buttons} />
+          </CardFooter>
         )}
-        {row.candidateUrl && (
-          <Row label="Link ứng viên"><a href={row.candidateUrl} target="_blank" rel="noopener noreferrer" className="underline">{row.candidateUrl}</a></Row>
-        )}
-        <Row label="Giao dịch tạo job">
-          {row.createTx ? <ExtLink href={snowtraceTx(chainId, row.createTx)}>{row.createTx}</ExtLink> : "—"}
-        </Row>
-        <Row label="Link công khai">
-          <span className="flex flex-wrap items-center gap-2"><span>{publicLink}</span><CopyButton text={publicLink} /></span>
-        </Row>
-      </dl>
-      {buttons.length > 0 && <JobActions jobId={jobId} buttons={buttons} />}
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Link cho freelancer</CardTitle>
+          <CardDescription>Gửi link này để freelancer kết nối ví, nộp bài hoặc từ chối.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-2">
+          <code className="min-w-0 break-all rounded-md bg-muted px-2 py-1 font-mono text-xs">{publicLink}</code>
+          <CopyButton text={publicLink} />
+        </CardContent>
+      </Card>
     </>
   );
 }
 
 export default function JobPage(props: PageProps<"/jobs/[id]">) {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Chi tiết job</h1>
-      <Suspense fallback={<p>Đang tải...</p>}>
+    <PageShell>
+      <div className="flex flex-col gap-2">
+        <Button asChild variant="ghost" size="sm" className="self-start text-muted-foreground">
+          <Link href="/jobs">
+            <ArrowLeftIcon /> Công việc
+          </Link>
+        </Button>
+        <PageHeader title="Chi tiết job" />
+      </div>
+      <Suspense fallback={<LoadingBlock rows={3} />}>
         <Content params={props.params} />
       </Suspense>
-    </main>
+    </PageShell>
   );
 }

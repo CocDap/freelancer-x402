@@ -1,25 +1,23 @@
 import { eq } from "drizzle-orm";
+import { TriangleAlertIcon } from "lucide-react";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { DetailList, DetailRow, ExtLink } from "@/components/detail-list";
+import { JobStatusBadge } from "@/components/job-status-badge";
+import { LoadingBlock } from "@/components/loading";
+import { PageHeader, PageShell } from "@/components/page-header";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getChainClients } from "@/lib/chain/clients";
 import { getDb } from "@/lib/db/client";
 import { job } from "@/lib/db/schema";
 import { getJob } from "@/lib/escrow/read";
-import { CONTENT_MISMATCH_WARNING, contentUrlMatches, formatChainTime, formatUsdc, isJobId, snowtraceAddress, snowtraceTx, stateLabel } from "@/lib/jobs/format";
+import { CONTENT_MISMATCH_WARNING, contentUrlMatches, formatChainTime, formatUsdc, isJobId, shortHash, snowtraceAddress, snowtraceTx, stateLabel } from "@/lib/jobs/format";
 import { FreelancerPanel } from "./freelancer-panel";
 import { PublicJobProviders } from "./providers";
 
 const DAY = 86_400;
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-4">
-      <dt className="w-44 shrink-0 text-sm text-zinc-500">{label}</dt>
-      <dd className="min-w-0 break-all text-sm">{children}</dd>
-    </div>
-  );
-}
 
 function days(seconds: number): string {
   return String(Math.round((seconds / DAY) * 100) / 100);
@@ -51,65 +49,81 @@ async function Content({ params }: { params: PageProps<"/j/[jobId]">["params"] }
 
   return (
     <>
-      <p className="text-lg font-medium">{PUBLIC_STATE[view.stateName] ?? stateLabel(view.stateName)}</p>
       {view.stateName === "Submitted" && !contentOk && (
-        <p role="alert" className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">{CONTENT_MISMATCH_WARNING}</p>
+        <Alert variant="warning">
+          <TriangleAlertIcon />
+          <AlertDescription>{CONTENT_MISMATCH_WARNING}</AlertDescription>
+        </Alert>
       )}
-      <dl className="flex flex-col gap-2">
-        <Row label="Số tiền đã khoá">{formatUsdc(view.amount)} USDC</Row>
-        <Row label="Ví freelancer"><span className="font-mono">{view.freelancer}</span></Row>
-        <Row label="Hạn nộp bài">{formatChainTime(view.deliverDeadline)}</Row>
-        {view.submittedAt > 0n && <Row label="Hạn người thuê duyệt">{formatChainTime(reviewDeadline)}</Row>}
-        {view.stateName === "RevisionRequested" && <Row label="Hạn nộp bản sửa">{formatChainTime(view.revisionDeadline)}</Row>}
-        {contentOk && row?.contentUrl && (
-          <Row label="Link bài">
-            <a href={row.contentUrl} target="_blank" rel="noopener noreferrer" className="underline">{row.contentUrl}</a>
-          </Row>
-        )}
-        <Row label="Hợp đồng escrow">
-          {escrowLink ? <a href={escrowLink} target="_blank" rel="noopener noreferrer" className="underline">{clients.escrow}</a> : <span className="font-mono">{clients.escrow}</span>}
-        </Row>
-        {txLink && row?.createTx && (
-          <Row label="Giao dịch khoá tiền">
-            <a href={txLink} target="_blank" rel="noopener noreferrer" className="underline">{row.createTx}</a>
-          </Row>
-        )}
-      </dl>
 
-      <section className="flex flex-col gap-1 rounded bg-zinc-50 p-4 text-sm">
-        <h2 className="font-medium">Luật chơi</h2>
-        <ul className="list-disc pl-5">
-          <li>Người thuê có {days(view.reviewWindow)} ngày để duyệt bài sau khi bạn nộp. Quá hạn mà không duyệt, bạn có thể nhận tiền.</li>
-          <li>Nếu người thuê yêu cầu sửa, bạn có {days(view.revisionWindow)} ngày để nộp lại.</li>
-          <li>Tối đa {view.maxRevisions} lần yêu cầu sửa (đã dùng {view.revisionCount}).</li>
-          <li>Quá hạn sửa thì chia đôi 50/50.</li>
-        </ul>
-      </section>
+      <Card>
+        <CardHeader>
+          <CardDescription>Số tiền đã khoá</CardDescription>
+          <CardTitle className="font-mono text-3xl font-semibold tabular-nums">{formatUsdc(view.amount)} USDC</CardTitle>
+          <div className="pt-1">
+            <JobStatusBadge stateName={view.stateName} label={PUBLIC_STATE[view.stateName] ?? stateLabel(view.stateName)} />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <DetailList>
+            <DetailRow label="Ví freelancer"><span className="font-mono">{view.freelancer}</span></DetailRow>
+            <DetailRow label="Hạn nộp bài">{formatChainTime(view.deliverDeadline)}</DetailRow>
+            {view.submittedAt > 0n && <DetailRow label="Hạn người thuê duyệt">{formatChainTime(reviewDeadline)}</DetailRow>}
+            {view.stateName === "RevisionRequested" && <DetailRow label="Hạn nộp bản sửa">{formatChainTime(view.revisionDeadline)}</DetailRow>}
+            {contentOk && row?.contentUrl && (
+              <DetailRow label="Link bài"><ExtLink href={row.contentUrl}>{row.contentUrl}</ExtLink></DetailRow>
+            )}
+            <DetailRow label="Hợp đồng escrow">
+              <span className="font-mono"><ExtLink href={escrowLink}>{clients.escrow}</ExtLink></span>
+            </DetailRow>
+            {txLink && row?.createTx && (
+              <DetailRow label="Giao dịch khoá tiền">
+                <span className="font-mono"><ExtLink href={txLink}>{shortHash(row.createTx, 10, 8)}</ExtLink></span>
+              </DetailRow>
+            )}
+          </DetailList>
+        </CardContent>
+      </Card>
 
       <PublicJobProviders chainId={chainId}>
-      <FreelancerPanel
-        jobId={jobId}
-        chainId={chainId}
-        escrow={clients.escrow}
-        freelancer={view.freelancer}
-        actionNonce={view.actionNonce}
-        stateName={view.stateName}
-        canSubmit={actions.freelancer.includes("submit")}
-        canDecline={actions.freelancer.includes("decline")}
-        canFinalize={actions.anyone.length > 0}
-      />
+        <FreelancerPanel
+          jobId={jobId}
+          chainId={chainId}
+          escrow={clients.escrow}
+          freelancer={view.freelancer}
+          actionNonce={view.actionNonce}
+          stateName={view.stateName}
+          canSubmit={actions.freelancer.includes("submit")}
+          canDecline={actions.freelancer.includes("decline")}
+          canFinalize={actions.anyone.length > 0}
+        />
       </PublicJobProviders>
+
+      <Card className="bg-muted/40">
+        <CardHeader>
+          <CardTitle>Luật chơi</CardTitle>
+          <CardDescription>Do hợp đồng escrow thực thi, không ai sửa được.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="flex list-disc flex-col gap-1.5 pl-5 text-sm">
+            <li>Người thuê có {days(view.reviewWindow)} ngày để duyệt bài sau khi bạn nộp. Quá hạn mà không duyệt, bạn có thể nhận tiền.</li>
+            <li>Nếu người thuê yêu cầu sửa, bạn có {days(view.revisionWindow)} ngày để nộp lại.</li>
+            <li>Tối đa {view.maxRevisions} lần yêu cầu sửa (đã dùng {view.revisionCount}).</li>
+            <li>Quá hạn sửa thì chia đôi 50/50.</li>
+          </ul>
+        </CardContent>
+      </Card>
     </>
   );
 }
 
 export default function PublicJobPage(props: PageProps<"/j/[jobId]">) {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Công việc</h1>
-      <Suspense fallback={<p>Đang tải...</p>}>
+    <PageShell>
+      <PageHeader title="Công việc" description="Trang dành cho freelancer. Tiền đã nằm trong escrow trước khi bạn bắt đầu." />
+      <Suspense fallback={<LoadingBlock rows={3} />}>
         <Content params={props.params} />
       </Suspense>
-    </main>
+    </PageShell>
   );
 }

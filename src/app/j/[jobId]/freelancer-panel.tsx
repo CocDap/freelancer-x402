@@ -1,9 +1,15 @@
 "use client";
 
+import { CircleCheckIcon, Loader2Icon, SendIcon, TriangleAlertIcon, WalletIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { keccak256, toBytes, zeroHash, type Address, type Hex } from "viem";
 import { useConnect, useConnection, useConnectors, useDisconnect, useSignTypedData, useSwitchChain } from "wagmi";
+import { FormField } from "@/components/form-field";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { ACTION_TYPES, ActionKind, actionMessage, escrowDomain } from "@/lib/escrow/typed-data";
 
 export type PanelProps = {
@@ -96,76 +102,93 @@ export function FreelancerPanel(p: PanelProps) {
 
   const finalizeJob = () => run("Hoàn tất", () => post({ kind: "finalize" }));
 
-  const btn = "rounded bg-black px-3 py-2 text-white disabled:opacity-50";
-
   return (
-    <section className="flex flex-col gap-3 rounded border border-zinc-300 p-4">
-      <h2 className="text-lg font-medium">Dành cho freelancer</h2>
-
-      {!connected ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-zinc-600">Kết nối ví freelancer để nộp bài hoặc từ chối. Bạn không cần AVAX để trả phí gas.</p>
-          <button
-            type="button"
-            className={btn}
-            disabled={connect.isPending || connectors.length === 0}
-            onClick={() => connect.mutate({ connector: connectors[0], chainId: p.chainId })}
-          >
-            {connect.isPending ? "Đang kết nối..." : "Kết nối ví"}
-          </button>
-          {connect.isError && <p role="alert" className="text-sm text-red-700">Không kết nối được ví. Hãy cài ví (ví dụ MetaMask) và thử lại.</p>}
-        </div>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-mono break-all">{connection.address}</span>
-          <button type="button" className="underline" onClick={() => disconnect.mutate()}>Ngắt kết nối</button>
-        </div>
-      )}
-
-      {wrongWallet && (
-        <p role="alert" className="rounded border border-yellow-300 bg-yellow-50 p-3 text-sm">Ví này không phải ví freelancer của job</p>
-      )}
-
-      {(p.canSubmit || p.canDecline) && (
-        <div className="flex flex-col gap-2">
-          {p.canSubmit && (
-            <label className="flex flex-col gap-1 text-sm">
-              Link bài
-              <input
-                type="url"
-                value={contentUrl}
-                onChange={(e) => setContentUrl(e.target.value)}
-                placeholder="https://..."
-                maxLength={2048}
-                className="rounded border border-zinc-300 p-2"
-              />
-            </label>
-          )}
-          <div className="flex flex-wrap gap-2">
-            {p.canSubmit && (
-              <button type="button" className={btn} disabled={!canSign} onClick={submit}>
-                {busy ? "Đang xử lý..." : "Nộp bài"}
-              </button>
-            )}
-            {p.canDecline && (
-              <button type="button" className={btn} disabled={!canSign} onClick={decline}>
-                Từ chối nhận việc
-              </button>
+    <Card>
+      <CardHeader>
+        <CardTitle>Dành cho freelancer</CardTitle>
+        <CardDescription>Kết nối ví freelancer để nộp bài hoặc từ chối. Bạn không cần AVAX để trả phí gas.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {!connected ? (
+          <div className="flex flex-col items-start gap-2">
+            <Button
+              disabled={connect.isPending || connectors.length === 0}
+              onClick={() => connect.mutate({ connector: connectors[0], chainId: p.chainId })}
+            >
+              {connect.isPending ? <Loader2Icon className="animate-spin" /> : <WalletIcon />}
+              {connect.isPending ? "Đang kết nối..." : "Kết nối ví"}
+            </Button>
+            {connect.isError && (
+              <Alert variant="destructive">
+                <TriangleAlertIcon />
+                <AlertDescription>Không kết nối được ví. Hãy cài ví (ví dụ MetaMask) và thử lại.</AlertDescription>
+              </Alert>
             )}
           </div>
-        </div>
-      )}
+        ) : (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-sm">
+            <span className={isFreelancer ? "size-2 rounded-full bg-success" : "size-2 rounded-full bg-warning"} aria-hidden />
+            <span className="min-w-0 break-all font-mono">{connection.address}</span>
+            <Button variant="link" size="sm" className="ml-auto h-auto px-0" onClick={() => disconnect.mutate()}>
+              Ngắt kết nối
+            </Button>
+          </div>
+        )}
 
-      {p.canFinalize && (
-        <div>
-          <button type="button" className={btn} disabled={busy} onClick={finalizeJob}>
-            {busy ? "Đang xử lý..." : "Hoàn tất"}
-          </button>
-        </div>
-      )}
+        {wrongWallet && (
+          <Alert variant="warning">
+            <TriangleAlertIcon />
+            <AlertDescription>Ví này không phải ví freelancer của job</AlertDescription>
+          </Alert>
+        )}
 
-      {error && <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-      {done && <p className="break-all rounded border border-green-300 bg-green-50 p-3 text-sm">{done}</p>}
-    </section>
+        {p.canSubmit && (
+          <FormField label="Link bài" htmlFor="contentUrl">
+            <Input
+              id="contentUrl"
+              type="url"
+              value={contentUrl}
+              onChange={(e) => setContentUrl(e.target.value)}
+              placeholder="https://..."
+              maxLength={2048}
+            />
+          </FormField>
+        )}
+
+        {(p.canSubmit || p.canDecline || p.canFinalize) && (
+          <div className="flex flex-wrap gap-2">
+            {p.canSubmit && (
+              <Button disabled={!canSign} onClick={submit}>
+                {busy ? <Loader2Icon className="animate-spin" /> : <SendIcon />}
+                {busy ? "Đang xử lý..." : "Nộp bài"}
+              </Button>
+            )}
+            {p.canDecline && (
+              <Button variant="outline" disabled={!canSign} onClick={decline}>
+                Từ chối nhận việc
+              </Button>
+            )}
+            {p.canFinalize && (
+              <Button variant="secondary" disabled={busy} onClick={finalizeJob}>
+                {busy ? "Đang xử lý..." : "Hoàn tất"}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {error && (
+          <Alert variant="destructive">
+            <TriangleAlertIcon />
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+        {done && (
+          <Alert variant="success" role="status">
+            <CircleCheckIcon />
+            <AlertDescription className="break-all">{done}</AlertDescription>
+          </Alert>
+        )}
+      </CardContent>
+    </Card>
   );
 }

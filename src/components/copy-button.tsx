@@ -1,13 +1,16 @@
 "use client";
 
+import { CheckIcon, CopyIcon } from "lucide-react";
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 
 export function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <button
+    <Button
       type="button"
-      className="rounded border px-2 py-1 text-sm"
+      variant="outline"
+      size="sm"
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);
@@ -18,7 +21,8 @@ export function CopyButton({ text }: { text: string }) {
         }
       }}
     >
+      {copied ? <CheckIcon /> : <CopyIcon />}
       {copied ? "Đã copy" : "Copy"}
-    </button>
+    </Button>
   );
 }

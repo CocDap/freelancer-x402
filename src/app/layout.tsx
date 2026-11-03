@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import Link from "next/link";
+import { Be_Vietnam_Pro, Geist_Mono } from "next/font/google";
+import { AppHeader } from "@/components/app-header";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const beVietnam = Be_Vietnam_Pro({
+  variable: "--font-be-vietnam",
+  subsets: ["latin", "vietnamese"],
+  weight: ["400", "500", "600", "700"],
 });
 
 const geistMono = Geist_Mono({
@@ -22,15 +25,15 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="vi"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
+      className={`${beVietnam.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <nav className="flex gap-4 border-b px-6 py-3 text-sm">
-          <Link href="/search">Tìm kiếm</Link>
-          <Link href="/jobs">Công việc</Link>
-          <Link href="/wallet">Ví</Link>
-        </nav>
-        {children}
+      <body className="flex min-h-full flex-col">
+        <ThemeProvider>
+          <AppHeader />
+          {children}
+          <Toaster />
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -1,6 +1,13 @@
+import { ExternalLinkIcon, TriangleAlertIcon } from "lucide-react";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { CopyButton } from "@/components/copy-button";
+import { DetailList, DetailRow, ExtLink } from "@/components/detail-list";
+import { LoadingBlock } from "@/components/loading";
+import { PageHeader, PageShell } from "@/components/page-header";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth";
 import { getChainClients } from "@/lib/chain/clients";
 import { usdcAbi } from "@/lib/chain/usdc-abi";
@@ -21,40 +28,68 @@ async function Content() {
   const link = snowtraceAddress(c.chain.id, address);
   const relayerLow = relayerAvax < BigInt(Math.round(c.relayerMinAvax * 1e18));
   return (
-    <div className="flex flex-col gap-4">
-      <section className="flex flex-col gap-1">
-        <h2 className="font-medium">Địa chỉ ví của bạn</h2>
-        <p className="flex flex-wrap items-center gap-2 break-all font-mono text-sm">
-          {link ? <a href={link} target="_blank" rel="noopener noreferrer" className="underline">{address}</a> : address}
-          <CopyButton text={address} />
-        </p>
-      </section>
-      <section className="flex flex-col gap-1 text-sm">
-        <p>Số dư USDC: <strong>{formatUsdc(usdc)}</strong></p>
-        <p>Số dư AVAX: <strong>{formatAvax(avax)}</strong> <span className="text-zinc-500">(không cần, relayer trả gas)</span></p>
-        <p>
-          Cần USDC testnet?{" "}
-          <a href={CIRCLE_FAUCET_URL} target="_blank" rel="noopener noreferrer" className="underline">Faucet của Circle (Fuji)</a>
-        </p>
-      </section>
-      <section className="flex flex-col gap-1 text-sm">
-        <h2 className="font-medium">Relayer</h2>
-        <p>Số dư AVAX của relayer: <strong>{formatAvax(relayerAvax)}</strong> (tối thiểu {c.relayerMinAvax})</p>
-        {relayerLow && (
-          <p role="alert" className="rounded border border-red-300 bg-red-50 p-3 text-red-800">Ví relayer hết AVAX nên chưa thể khoá tiền. Hãy nạp thêm AVAX cho relayer.</p>
-        )}
-      </section>
-    </div>
+    <>
+      <Card>
+        <CardHeader>
+          <CardDescription>Số dư USDC</CardDescription>
+          <CardTitle className="font-mono text-3xl font-semibold tabular-nums">{formatUsdc(usdc)}</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          <span className="text-sm text-muted-foreground">Địa chỉ ví của bạn</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <code className="break-all font-mono text-sm">
+              <ExtLink href={link}>{address}</ExtLink>
+            </code>
+            <CopyButton text={address} />
+          </div>
+        </CardContent>
+        <CardFooter className="flex flex-wrap justify-between gap-2 text-sm text-muted-foreground">
+          <span>
+            AVAX: <span className="font-mono text-foreground">{formatAvax(avax)}</span> (không cần, relayer trả gas)
+          </span>
+          <a href={CIRCLE_FAUCET_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-foreground underline underline-offset-4">
+            Lấy USDC testnet <ExternalLinkIcon className="size-3" />
+          </a>
+        </CardFooter>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Relayer</CardTitle>
+          <CardDescription>Ví trả phí gas thay bạn và freelancer.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <DetailList>
+            <DetailRow label="Số dư AVAX">
+              <span className="inline-flex items-center gap-2">
+                <span className="font-mono">{formatAvax(relayerAvax)}</span>
+                <Badge variant={relayerLow ? "destructive" : "success"}>{relayerLow ? "Thiếu" : "Đủ"}</Badge>
+              </span>
+            </DetailRow>
+            <DetailRow label="Tối thiểu">
+              <span className="font-mono">{c.relayerMinAvax}</span>
+            </DetailRow>
+          </DetailList>
+          {relayerLow && (
+            <Alert variant="destructive">
+              <TriangleAlertIcon />
+              <AlertTitle>Relayer hết AVAX</AlertTitle>
+              <AlertDescription>Chưa thể khoá tiền. Hãy nạp thêm AVAX cho ví relayer.</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
 export default function WalletPage() {
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-col gap-4 p-6">
-      <h1 className="text-2xl font-semibold">Ví</h1>
-      <Suspense fallback={<p>Đang tải...</p>}>
+    <PageShell>
+      <PageHeader title="Ví" description="Ví USDC do app quản lý. Bạn không cần ví riêng hay AVAX." />
+      <Suspense fallback={<LoadingBlock rows={2} />}>
         <Content />
       </Suspense>
-    </main>
+    </PageShell>
   );
 }
