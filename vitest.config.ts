@@ -12,5 +12,7 @@ export default defineConfig({
     // All chain tests share one anvil and some fast-forward its clock, so test files run one at a time.
     fileParallelism: false,
     testTimeout: 30_000,
+    // @x402/next imports "next/server" without extension; inline so vite resolves it.
+    server: { deps: { inline: ["@x402/next"] } },
   },
 });
