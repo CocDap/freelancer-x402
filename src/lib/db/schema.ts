@@ -8,6 +8,8 @@ export const wallet = sqliteTable("wallet", {
   encryptedKey: text("encrypted_key").notNull(),
   /** Welcome USDC grant: null = not sent yet, "pending" = claimed/being sent, else the transfer tx hash. */
   welcomeGrantTx: text("welcome_grant_tx"),
+  /** HMAC of the client IP that claimed the grant (welcomeGrantIpKey); UNIQUE = one grant per IP. */
+  welcomeGrantIpHash: text("welcome_grant_ip_hash").unique(),
 });
 
 export const search = sqliteTable("search", {

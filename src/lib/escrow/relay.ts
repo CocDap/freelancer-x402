@@ -14,6 +14,7 @@ import {
   type Address,
   type Hex,
 } from "viem";
+import { createHmac } from "node:crypto";
 import { and, eq, isNull } from "drizzle-orm";
 import { escrowAbi } from "@/lib/chain/escrow-abi";
 import { RECEIVE_WITH_AUTHORIZATION_TYPES, usdcAbi } from "@/lib/chain/usdc-abi";
@@ -400,17 +401,32 @@ export async function relayFreelancerAction(
 
 export type WelcomeGrantResult =
   | { status: "sent"; txHash: Hex }
-  | { status: "skipped"; reason: "disabled" | "already-granted" | "relayer-low-usdc" };
+  | { status: "skipped"; reason: "disabled" | "already-granted" | "ip-already-granted" | "relayer-low-usdc" };
+
+/** Keyed hash of the client IP: lets the grant be limited per IP without storing raw IPs. Unknown IPs share one key. */
+export function welcomeGrantIpKey(ip: string | null): string {
+  return createHmac("sha256", getEnv().AUTH_SECRET).update(`welcome-grant:${ip ?? "unknown"}`).digest("hex");
+}
+
+/** True when a DB error (or any error in its cause chain) is a SQLite UNIQUE constraint violation. */
+function isUniqueViolation(err: unknown): boolean {
+  for (let e: unknown = err; e instanceof Error; e = e.cause) {
+    if (/UNIQUE constraint failed/i.test(e.message) || (e as { code?: unknown }).code === "SQLITE_CONSTRAINT_UNIQUE") return true;
+  }
+  return false;
+}
 
 /**
  * Sends the one-time welcome grant (WELCOME_GRANT_USDC, default 0.3) from the relayer to the user's wallet.
- * At most once per wallet: the row is claimed (`welcome_grant_tx` null -> "pending") before anything is sent,
- * so concurrent callers can't double-pay. A failure before broadcast releases the claim for a later retry;
+ * At most once per wallet AND once per client IP (`ip`, stored only as welcomeGrantIpKey): the row is claimed
+ * (`welcome_grant_tx` null -> "pending", plus the IP key under a UNIQUE index) before anything is sent, so
+ * concurrent callers can't double-pay and a second account from the same IP gets "ip-already-granted". A failure before broadcast releases the claim for a later retry;
  * after broadcast the tx hash is stored and the grant is never re-sent. A relayer without enough USDC is a
  * skip (logged), not an error. Throws RelayerUnderfundedError when the relayer lacks AVAX for gas.
  */
 export async function grantWelcomeUsdc(
   userId: string,
+  ip: string | null,
   deps: RelayDeps & { amountUsdc?: number } = {},
 ): Promise<WelcomeGrantResult> {
   const amountUsdc = deps.amountUsdc ?? getEnv().WELCOME_GRANT_USDC;
@@ -420,6 +436,12 @@ export async function grantWelcomeUsdc(
   const to = await getOrCreateUserWallet(userId, database);
   const [row] = await database.select({ tx: wallet.welcomeGrantTx }).from(wallet).where(eq(wallet.userId, userId));
   if (row?.tx) return { status: "skipped", reason: "already-granted" };
+  const ipKey = welcomeGrantIpKey(ip);
+  const [ipUsed] = await database
+    .select({ userId: wallet.userId })
+    .from(wallet)
+    .where(eq(wallet.welcomeGrantIpHash, ipKey));
+  if (ipUsed) return { status: "skipped", reason: "ip-already-granted" };
 
   const c = await resolveChainClients(deps);
   const value = parseUnits(String(amountUsdc), USDC_DECIMALS);
@@ -438,11 +460,18 @@ export async function grantWelcomeUsdc(
   }
   await assertRelayerFunded(c);
 
-  const claimed = await database
-    .update(wallet)
-    .set({ welcomeGrantTx: "pending" })
-    .where(and(eq(wallet.userId, userId), isNull(wallet.welcomeGrantTx)))
-    .returning({ userId: wallet.userId });
+  let claimed;
+  try {
+    claimed = await database
+      .update(wallet)
+      .set({ welcomeGrantTx: "pending", welcomeGrantIpHash: ipKey })
+      .where(and(eq(wallet.userId, userId), isNull(wallet.welcomeGrantTx)))
+      .returning({ userId: wallet.userId });
+  } catch (err) {
+    // Another account from this IP claimed it between our check and this update.
+    if (isUniqueViolation(err)) return { status: "skipped", reason: "ip-already-granted" };
+    throw err;
+  }
   if (claimed.length === 0) return { status: "skipped", reason: "already-granted" };
 
   let hash: Hex | undefined;
@@ -463,7 +492,12 @@ export async function grantWelcomeUsdc(
     });
   } catch (err) {
     // Not broadcast: release the claim so a later call can retry. Broadcast: keep the hash, never re-send.
-    if (!hash) await database.update(wallet).set({ welcomeGrantTx: null }).where(eq(wallet.userId, userId));
+    if (!hash) {
+      await database
+        .update(wallet)
+        .set({ welcomeGrantTx: null, welcomeGrantIpHash: null })
+        .where(eq(wallet.userId, userId));
+    }
     throw err;
   }
 }

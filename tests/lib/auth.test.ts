@@ -26,9 +26,16 @@ describe("auth", () => {
     expect(await getUserAddress(res.user.id, db)).toMatch(/^0x[0-9a-fA-F]{40}$/);
   });
 
-  it("second signup rejected 403", async () => {
+  it("more users can sign up, each with their own wallet", async () => {
+    const alice = await signUp("alice");
+    const bob = await signUp("bob");
+    expect(bob.user.id).not.toBe(alice.user.id);
+    expect(await getUserAddress(bob.user.id, db)).not.toBe(await getUserAddress(alice.user.id, db));
+  });
+
+  it("duplicate username rejected", async () => {
     await signUp("alice");
-    await expect(signUp("bob")).rejects.toMatchObject({ statusCode: 403 });
+    await expect(signUp("alice", "otherpass99")).rejects.toMatchObject({ statusCode: expect.any(Number) });
   });
 
   it("login with username+password returns session", async () => {

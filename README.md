@@ -1,6 +1,6 @@
 # dapp-avax: thuê freelancer viết bài bằng USDC trên Avalanche Fuji
 
-Một người thuê đăng nhập bằng username/password. Một AI agent tìm freelancer viết bài (X, LinkedIn, Threads) qua proxy tìm kiếm của chính app, mỗi lần gọi trả bằng USDC theo giao thức x402. Người thuê chốt ứng viên rồi khoá tiền vào hợp đồng escrow USDC. Mọi gas do ví relayer của hệ thống trả, nên người thuê và freelancer không cần AVAX.
+Người thuê đăng ký và đăng nhập bằng username/password, mỗi tài khoản một ví riêng. Một AI agent tìm freelancer viết bài (X, LinkedIn, Threads) qua proxy tìm kiếm của chính app, mỗi lần gọi trả bằng USDC theo giao thức x402. Người thuê chốt ứng viên rồi khoá tiền vào hợp đồng escrow USDC. Mọi gas do ví relayer của hệ thống trả, nên người thuê và freelancer không cần AVAX.
 
 > Chỉ dùng cho testnet (Avalanche Fuji, chain id 43113). Đây là demo, không phải sản phẩm để giữ tiền thật.
 
@@ -53,7 +53,7 @@ Tất cả đều bắt buộc (trừ `DATABASE_AUTH_TOKEN`). Mã nguồn không
 | `ESCROW_ADDRESS` | không | Địa chỉ `FreelanceEscrow` sau khi deploy. |
 | `RELAYER_PRIVATE_KEY` | có | Private key (0x + 64 hex) của ví relayer trả gas. |
 | `RELAYER_MIN_AVAX` | không | Số AVAX tối thiểu của relayer; thấp hơn thì app từ chối gửi giao dịch (không chỉ cảnh báo), giá trị gợi ý `0.05`. |
-| `WELCOME_GRANT_USDC` | không | USDC relayer tặng mỗi ví mới đúng một lần (mặc định `0.3`, `0` = tắt). Relayer phải có USDC; thiếu thì bỏ qua và trang Ví thử lại sau. |
+| `WELCOME_GRANT_USDC` | không | USDC relayer tặng ví mới (mặc định `0.3`, `0` = tắt). Mỗi ví một lần và mỗi IP một lần, dù IP đó tạo nhiều tài khoản. Relayer phải có USDC; thiếu thì bỏ qua và trang Ví thử lại sau. |
 | `APP_URL` | không | URL gốc của app, ví dụ `http://localhost:3000` hoặc URL Vercel. |
 | `WALLET_ENCRYPTION_KEY` | có | 32 byte base64 để mã hoá key ví người dùng: `openssl rand -base64 32`. |
 | `AUTH_SECRET` | có | Secret cho better-auth: `openssl rand -base64 32`. |
@@ -186,6 +186,6 @@ Kiểm tra `GET https://facilitator.payai.network/supported` (công khai, không
 
 - Không có cron: không ai tự động hoàn tất job khi quá hạn. Nút "Hoàn tất" (người thuê hoặc freelancer bấm, ai cũng gọi được) mới thực hiện bước kết thúc on-chain.
 - Tìm kiếm có thể chạy lâu (gọi nhiều nguồn + LLM); trang `/search` đặt `maxDuration = 300` giây, cần gói Vercel cho phép thời lượng này.
-- Chỉ một người thuê / một người dùng chính; chưa có phân quyền nhiều người.
+- Ai cũng đăng ký được (mỗi tài khoản một ví riêng), không có phân quyền hay admin. Quà chào mừng (`WELCOME_GRANT_USDC`) giới hạn một lần mỗi IP (DB chỉ lưu HMAC của IP, không lưu IP thô). IP lấy từ `x-forwarded-for`: trên Vercel header này đáng tin, còn tự host mà không có proxy tin cậy phía trước thì client giả được. Đổi IP (VPN, 4G) vẫn nhận thêm được; nhiều người chung một mạng (văn phòng, NAT) thì chỉ người đầu tiên nhận.
 - SQLite file không bền trên Vercel (hệ thống file tạm), nên bắt buộc dùng Turso khi deploy.
 - Form tạo job nhận số ngày lẻ (tối thiểu 0.001 ngày); server bắt buộc cửa sổ duyệt/sửa tối thiểu 60 giây. Xem `docs/e2e-checklist.md` để test với cửa sổ ngắn.

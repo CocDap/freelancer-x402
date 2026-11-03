@@ -17,8 +17,9 @@ export default function SignupPage() {
       password: String(form.get("password")),
     });
     if (error) {
-      return error.status === 403
-        ? "Đã có tài khoản. Công cụ này chỉ cho phép một người dùng."
+      // The synthetic email mirrors the username, so a taken name can surface as either code.
+      return error.code === "USERNAME_IS_ALREADY_TAKEN" || error.code?.startsWith("USER_ALREADY_EXISTS")
+        ? "Tên đăng nhập đã có người dùng. Hãy chọn tên khác."
         : "Đăng ký không thành công. Mật khẩu cần ít nhất 8 ký tự.";
     }
     router.push("/search");
@@ -29,7 +30,7 @@ export default function SignupPage() {
   return (
     <AuthCard
       title="Đăng ký"
-      description="Công cụ dành cho một người dùng. Ví USDC được tạo tự động cho bạn."
+      description="Mỗi tài khoản có một ví USDC riêng, được tạo tự động."
       passwordLabel="Mật khẩu (tối thiểu 8 ký tự)"
       passwordAutoComplete="new-password"
       minLength={8}

@@ -1,6 +1,5 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { username } from "better-auth/plugins";
 import { headers } from "next/headers";
@@ -9,6 +8,7 @@ import { getDb, type Db } from "@/lib/db/client";
 import * as schema from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
 import { grantWelcomeUsdc } from "@/lib/escrow/relay";
+import { clientIp } from "@/lib/request-ip";
 import { getOrCreateUserWallet } from "@/lib/wallet/user-wallet";
 
 /** Builds a better-auth instance bound to `database` (tests pass an in-memory db). */
@@ -23,18 +23,12 @@ export function createAuth(database: Db = getDb()) {
     databaseHooks: {
       user: {
         create: {
-          // Single-user tool: only the very first signup is allowed.
-          before: async () => {
-            const existing = await database.select({ id: schema.user.id }).from(schema.user).limit(1);
-            if (existing.length > 0) {
-              throw new APIError("FORBIDDEN", { message: "Signup is closed" });
-            }
-          },
-          after: async (created) => {
+          after: async (created, ctx) => {
             // Fast path; getUserAccount/getUserAddress recover if this fails (the hook runs after commit).
             await getOrCreateUserWallet(created.id, database);
             // Never fails signup: on error the wallet page retries the grant later.
-            await grantWelcomeUsdc(created.id, { db: database }).catch((err: unknown) => {
+            const ip = clientIp(ctx?.headers ?? ctx?.request?.headers);
+            await grantWelcomeUsdc(created.id, ip, { db: database }).catch((err: unknown) => {
               console.error("[auth] welcome grant failed:", err instanceof Error ? `${err.name}: ${err.message}` : "unknown");
             });
           },
