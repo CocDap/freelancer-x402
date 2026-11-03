@@ -44,3 +44,8 @@ next-env.d.ts
 # project
 .superpowers/
 node_modules/
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
