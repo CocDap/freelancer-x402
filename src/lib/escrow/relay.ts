@@ -1,3 +1,4 @@
+import "server-only";
 // Server-side relay: the relayer wallet sends every escrow transaction and pays all gas.
 // Buyers (custodial wallets) and freelancers (their own wallets) only sign.
 import {
@@ -53,6 +54,21 @@ export class InsufficientUsdcError extends Error {
       `Số dư USDC không đủ: có ${formatUnits(have, USDC_DECIMALS)} USDC, cần ${formatUnits(need, USDC_DECIMALS)} USDC.`,
     );
     this.name = "InsufficientUsdcError";
+  }
+}
+
+/**
+ * createJob failed AFTER the job row was written and the tx was (about to be) broadcast. The escrow may or may
+ * not be funded: callers must NOT ask the user to retry (a retry would fund a second escrow) and should send
+ * them to the job page, which shows the on-chain state / reconcile hint.
+ */
+export class JobPendingError extends Error {
+  constructor(
+    readonly jobId: Hex,
+    options?: { cause?: unknown },
+  ) {
+    super("Job đã được gửi lên chuỗi nhưng chưa xác nhận được kết quả. Vui lòng kiểm tra trang job, đừng tạo lại.", options);
+    this.name = "JobPendingError";
   }
 }
 
@@ -276,26 +292,43 @@ export async function createJob(
   // The job row is written after simulation succeeds and BEFORE broadcast (createTx null), so a crash or a
   // receipt timeout after broadcast never leaves funded escrow the app doesn't know about; such rows are
   // reconciled with getJob(). Pre-send failures (USDC/relayer balance, simulate revert, insert error) send
-  // nothing and leave no row.
-  const txHash = await sendEscrowTx(
-    c,
-    "createJob",
-    {
-      functionName: "createJob",
-      args: [jobId, buyer.address, terms, validAfter, validBefore, usdcSig],
-    },
-    async () => {
-      await database.insert(job).values({
-        id: jobId,
-        userId,
-        freelancerAddress: terms.freelancer,
-        candidateUrl: input.candidateUrl ?? null,
-        createTx: null,
-      });
-    },
-  );
+  // nothing and leave no row. Once the row exists, ANY failure (writeContract, transport, receipt timeout,
+  // revert) surfaces as JobPendingError: the tx may still land, so the caller must never offer a retry.
+  let inserted = false;
+  let txHash: Hex;
+  try {
+    txHash = await sendEscrowTx(
+      c,
+      "createJob",
+      {
+        functionName: "createJob",
+        args: [jobId, buyer.address, terms, validAfter, validBefore, usdcSig],
+      },
+      async () => {
+        await database.insert(job).values({
+          id: jobId,
+          userId,
+          freelancerAddress: terms.freelancer,
+          candidateUrl: input.candidateUrl ?? null,
+          createTx: null,
+        });
+        inserted = true;
+      },
+    );
+  } catch (err) {
+    if (inserted) {
+      console.error("[relay] createJob failed after broadcast:", err instanceof Error ? `${err.name}: ${err.message}` : "unknown");
+      throw new JobPendingError(jobId, { cause: err });
+    }
+    throw err;
+  }
 
-  await database.update(job).set({ createTx: txHash }).where(eq(job.id, jobId));
+  try {
+    await database.update(job).set({ createTx: txHash }).where(eq(job.id, jobId));
+  } catch (err) {
+    // The job is funded; a missing createTx is cosmetic (the job page reads chain state).
+    console.error("[relay] could not store createTx:", err instanceof Error ? `${err.name}: ${err.message}` : "unknown");
+  }
 
   return { jobId, txHash };
 }
@@ -340,6 +373,8 @@ export async function relayFreelancerAction(
   deadline: bigint,
   sig: Hex,
   deps: RelayDeps = {},
+  /** Runs after simulate succeeds and right before broadcast (e.g. persist the submitted URL); if it throws, nothing is sent. */
+  beforeBroadcast?: () => Promise<void>,
 ): Promise<Hex> {
   if (kind !== "submit" && kind !== "decline") {
     throw new RelayInputError(`Thao tác freelancer không hợp lệ: ${String(kind)} (chỉ chấp nhận submit hoặc decline).`);
@@ -356,9 +391,9 @@ export async function relayFreelancerAction(
 
   const c = await resolveChainClients(deps);
   if (kind === "submit") {
-    return sendEscrowTx(c, "submit", { functionName: "submit", args: [jobId, contentHash, deadline, sig] });
+    return sendEscrowTx(c, "submit", { functionName: "submit", args: [jobId, contentHash, deadline, sig] }, beforeBroadcast);
   }
-  return sendEscrowTx(c, "decline", { functionName: "decline", args: [jobId, deadline, sig] });
+  return sendEscrowTx(c, "decline", { functionName: "decline", args: [jobId, deadline, sig] }, beforeBroadcast);
 }
 
 /** Permissionless settlement: `claim` when Submitted, `settleSplit` when RevisionRequested. */

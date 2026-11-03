@@ -1,5 +1,5 @@
 // Pure, client-safe helpers for the buyer UI.
-import { formatUnits } from "viem";
+import { formatUnits, keccak256, toBytes } from "viem";
 import { USDC_DECIMALS } from "@/lib/escrow/terms";
 
 export function formatUsdc(units: bigint): string {
@@ -75,4 +75,31 @@ export function isoToDate(iso: string): Date {
 
 export function isJobId(value: string): value is `0x${string}` {
   return /^0x[0-9a-fA-F]{64}$/.test(value);
+}
+
+export const CONTENT_MISMATCH_WARNING =
+  "Link bài không khớp với bản đã nộp on-chain — liên hệ freelancer để lấy link đúng.";
+
+/** True only when the stored URL is exactly the one whose keccak256 the freelancer signed on-chain. */
+export function contentUrlMatches(contentUrl: string | null | undefined, contentHash: string): boolean {
+  if (!contentUrl) return false;
+  return keccak256(toBytes(contentUrl)).toLowerCase() === contentHash.toLowerCase();
+}
+
+/** 0x1234…abcd form of a long hex value. */
+export function shortHash(hash: string, head = 6, tail = 4): string {
+  return hash.length <= head + tail + 3 ? hash : `${hash.slice(0, head)}…${hash.slice(-tail)}`;
+}
+
+const MAX_CANDIDATE_URL = 2048;
+
+/** Keeps a candidate URL only if it is http(s) and at most 2048 chars; otherwise null (ignored). */
+export function sanitizeCandidateUrl(value: string | null | undefined): string | null {
+  if (!value || value.length > MAX_CANDIDATE_URL) return null;
+  try {
+    const { protocol } = new URL(value);
+    return protocol === "http:" || protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
 }

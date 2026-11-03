@@ -8,7 +8,7 @@ import { redirect } from "next/navigation";
 import { getDb, type Db } from "@/lib/db/client";
 import * as schema from "@/lib/db/schema";
 import { getEnv } from "@/lib/env";
-import { createUserWallet } from "@/lib/wallet/user-wallet";
+import { getOrCreateUserWallet } from "@/lib/wallet/user-wallet";
 
 /** Builds a better-auth instance bound to `database` (tests pass an in-memory db). */
 export function createAuth(database: Db = getDb()) {
@@ -30,7 +30,8 @@ export function createAuth(database: Db = getDb()) {
             }
           },
           after: async (created) => {
-            await createUserWallet(created.id, database);
+            // Fast path; getUserAccount/getUserAddress recover if this fails (the hook runs after commit).
+            await getOrCreateUserWallet(created.id, database);
           },
         },
       },

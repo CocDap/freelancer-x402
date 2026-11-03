@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { keccak256, toBytes } from "viem";
 import { ChainActionError, InsufficientUsdcError, RelayerUnderfundedError } from "@/lib/escrow/relay";
 import { TermsError } from "@/lib/escrow/terms";
 import { mapActionError, termsErrorField } from "@/lib/jobs/errors";
-import { formatAvax, formatUsdc, isJobId, isoToDate, localInputToIso, snowtraceAddress, snowtraceTx, stateLabel } from "@/lib/jobs/format";
+import { CONTENT_MISMATCH_WARNING, contentUrlMatches, sanitizeCandidateUrl, shortHash, formatAvax, formatUsdc, isJobId, isoToDate, localInputToIso, snowtraceAddress, snowtraceTx, stateLabel } from "@/lib/jobs/format";
 
 describe("format", () => {
   it("formats USDC and AVAX", () => {
@@ -65,5 +66,31 @@ describe("mapActionError", () => {
     const raw = mapActionError(new Error("viem stack secret 0xdeadbeef"));
     expect(raw.message).not.toContain("secret");
     expect(raw.banner).toBe(true);
+  });
+});
+
+describe("content hash helpers", () => {
+  const url = "https://example.com/delivery";
+  const hash = keccak256(toBytes(url));
+  it("matches only the exact signed URL", () => {
+    expect(contentUrlMatches(url, hash)).toBe(true);
+    expect(contentUrlMatches(url, hash.toUpperCase().replace("0X", "0x"))).toBe(true);
+    expect(contentUrlMatches(url + "/", hash)).toBe(false);
+    expect(contentUrlMatches("https://evil.example/x", hash)).toBe(false);
+    expect(contentUrlMatches(null, hash)).toBe(false);
+    expect(CONTENT_MISMATCH_WARNING).toMatch(/không khớp/);
+  });
+  it("shortens hashes", () => {
+    expect(shortHash(hash)).toMatch(/^0x[0-9a-f]{4}…[0-9a-f]{4}$/);
+    expect(shortHash("0x12")).toBe("0x12");
+  });
+  it("sanitizeCandidateUrl keeps only http(s) up to 2048 chars", () => {
+    expect(sanitizeCandidateUrl("https://a.com/x")).toBe("https://a.com/x");
+    expect(sanitizeCandidateUrl("http://a.com")).toBe("http://a.com");
+    expect(sanitizeCandidateUrl("javascript:alert(1)")).toBeNull();
+    expect(sanitizeCandidateUrl("ftp://a.com")).toBeNull();
+    expect(sanitizeCandidateUrl("nope")).toBeNull();
+    expect(sanitizeCandidateUrl("")).toBeNull();
+    expect(sanitizeCandidateUrl("https://a.com/" + "a".repeat(2100))).toBeNull();
   });
 });

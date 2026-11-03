@@ -8,6 +8,7 @@ import { decryptKey } from "@/lib/wallet/crypto";
 import { getEnv } from "@/lib/env";
 import {
   createUserWallet,
+  getOrCreateUserWallet,
   getUserAccount,
   getUserAddress,
 } from "@/lib/wallet/user-wallet";
@@ -46,8 +47,28 @@ describe("user wallet", () => {
     await expect(createUserWallet("u1", db)).rejects.toThrow();
   });
 
-  it("throws for unknown user", async () => {
-    await expect(getUserAccount("nobody", db)).rejects.toThrow(/no wallet/i);
-    await expect(getUserAddress("nobody", db)).rejects.toThrow(/no wallet/i);
+  it("getUserAddress creates a missing wallet (recovers from a failed signup hook)", async () => {
+    expect(await db.select().from(wallet)).toHaveLength(0);
+    const address = await getUserAddress("nobody", db);
+    const rows = await db.select().from(wallet);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].address).toBe(address);
+    expect((await getUserAccount("nobody", db)).address).toBe(address);
+  });
+
+  it("two concurrent calls yield a single wallet with the same address", async () => {
+    const [a, b] = await Promise.all([getOrCreateUserWallet("race", db), getOrCreateUserWallet("race", db)]);
+    expect(a).toBe(b);
+    const rows = await db.select().from(wallet).where(eq(wallet.userId, "race"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].address).toBe(a);
+  });
+
+  it("an existing wallet is unchanged", async () => {
+    const address = await createUserWallet("keep", db);
+    const [before] = await db.select().from(wallet).where(eq(wallet.userId, "keep"));
+    expect(await getOrCreateUserWallet("keep", db)).toBe(address);
+    const [after] = await db.select().from(wallet).where(eq(wallet.userId, "keep"));
+    expect(after).toEqual(before);
   });
 });

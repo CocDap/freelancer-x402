@@ -25,6 +25,7 @@ import { TermsError, jobNonce, newJobId, toTerms, type JobTermsInput } from "@/l
 import {
   ChainActionError,
   InsufficientUsdcError,
+  JobPendingError,
   RelayInputError,
   RelayerUnderfundedError,
   buyerAction,
@@ -349,14 +350,51 @@ describe("relay", () => {
       },
     } as unknown as typeof chain.publicClient;
 
-    await expect(createJob(buyer.userId, input, { db, publicClient: flaky })).rejects.toThrow(/receipt timeout/);
+    const err = await createJob(buyer.userId, input, { db, publicClient: flaky }).catch((e) => e);
+    expect(err).toBeInstanceOf(JobPendingError);
 
     const rows = await db.select().from(job);
+    expect(err.jobId).toBe(rows[0].id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ userId: buyer.userId, freelancerAddress: freelancer.address, createTx: null });
     const view = await getJob(rows[0].id as Hex);
     expect(view.stateName).toBe("Funded");
     expect(view.buyer).toBe(buyer.address);
+  });
+
+  it("createJob: writeContract failure after the row insert -> JobPendingError with the row present", async () => {
+    const buyer = await newBuyer("100");
+    const { input } = await terms();
+    const real = createWalletClient({
+      chain: chain.chain,
+      transport: http(chain.ctx.rpcUrl),
+      account: privateKeyToAccount(chain.ctx.relayerKey),
+    });
+    const broken = Object.assign(Object.create(real), {
+      writeContract: async () => {
+        throw new Error("transport down");
+      },
+    }) as typeof real;
+    const err = await createJob(buyer.userId, input, { db, relayerClient: broken }).catch((e) => e);
+    expect(err).toBeInstanceOf(JobPendingError);
+    const rows = await db.select().from(job);
+    expect(rows).toHaveLength(1);
+    expect(err.jobId).toBe(rows[0].id);
+    expect(rows[0].createTx).toBeNull();
+  });
+
+  it("createJob: createTx update failure still returns { jobId, txHash }", async () => {
+    const buyer = await newBuyer("100");
+    const { input } = await terms();
+    const failing = Object.create(db) as Db;
+    failing.update = (() => {
+      throw new Error("db write failed");
+    }) as unknown as Db["update"];
+    const res = await createJob(buyer.userId, input, { db: failing });
+    expect(res.txHash).toMatch(/^0x[0-9a-f]{64}$/);
+    const rows = await db.select().from(job);
+    expect(rows[0].id).toBe(res.jobId);
+    expect((await getJob(res.jobId)).stateName).toBe("Funded");
   });
 
   it("createJob pre-send failures leave no job row and send nothing", async () => {
@@ -379,6 +417,45 @@ describe("relay", () => {
     expect(await db.select().from(job)).toHaveLength(0);
     expect(await chain.publicClient.getTransactionCount({ address: relayer })).toBe(nonceBefore);
     expect(await chain.usdcBalance(buyer.address)).toBe(parseUnits("100", 6));
+  });
+
+  it("relayFreelancerAction: beforeBroadcast runs after simulate and before the tx is sent", async () => {
+    const buyer = await newBuyer("100");
+    const { input, freelancer } = await terms();
+    const { jobId } = await createJob(buyer.userId, input, { db });
+    const contentHash = keccak256(toBytes("https://example.com/x"));
+    const good = await freelancerSign(freelancer, jobId, ActionKind.Submit, contentHash);
+    const events: string[] = [];
+    const real = createWalletClient({
+      chain: chain.chain,
+      transport: http(chain.ctx.rpcUrl),
+      account: privateKeyToAccount(chain.ctx.relayerKey),
+    });
+    const spy = Object.assign(Object.create(real), {
+      writeContract: async (...a: Parameters<typeof real.writeContract>) => {
+        events.push("write");
+        return real.writeContract(...a);
+      },
+    }) as typeof real;
+    await relayFreelancerAction(jobId, "submit", contentHash, good.deadline, good.sig, { relayerClient: spy }, async () => {
+      events.push("hook");
+    });
+    expect(events).toEqual(["hook", "write"]);
+  });
+
+  it("relayFreelancerAction: an invalid signature fails at simulate and never runs beforeBroadcast", async () => {
+    const buyer = await newBuyer("100");
+    const { input } = await terms();
+    const { jobId } = await createJob(buyer.userId, input, { db });
+    const contentHash = keccak256(toBytes("https://example.com/x"));
+    const stranger = privateKeyToAccount(generatePrivateKey());
+    const bad = await freelancerSign(stranger, jobId, ActionKind.Submit, contentHash);
+    let ran = false;
+    const err = await relayFreelancerAction(jobId, "submit", contentHash, bad.deadline, bad.sig, {}, async () => {
+      ran = true;
+    }).catch((e) => e);
+    expect(err).toBeInstanceOf(ChainActionError);
+    expect(ran).toBe(false);
   });
 
   it("relayFreelancerAction refuses empty/short signatures (no direct-call path via the relayer)", async () => {

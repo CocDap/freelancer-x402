@@ -6,9 +6,9 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db/client";
 import { job } from "@/lib/db/schema";
 import type { BuyerActionKind } from "@/lib/escrow/read";
-import { buyerAction, createJob, finalize } from "@/lib/escrow/relay";
+import { JobPendingError, buyerAction, createJob, finalize } from "@/lib/escrow/relay";
 import { mapActionError } from "@/lib/jobs/errors";
-import { isJobId, isoToDate } from "@/lib/jobs/format";
+import { isJobId, isoToDate, sanitizeCandidateUrl } from "@/lib/jobs/format";
 import type { ActionResult, CreateJobState } from "./state";
 
 const FIELDS = ["freelancerAddress", "amountUsdc", "deadline", "reviewDays", "revisionDays", "maxRevisions", "candidateUrl"] as const;
@@ -42,7 +42,8 @@ export async function createJobAction(_prev: CreateJobState, formData: FormData)
   if (values.maxRevisions === "" || Number.isNaN(maxRevisions)) return fail("Số lần sửa không hợp lệ.", "maxRevisions");
   if (!values.deadlineIso) return fail("Hạn nộp không hợp lệ.", "deadline");
 
-  let jobId: string;
+  let jobId: string | undefined;
+  let pendingJobId: string | undefined;
   try {
     const res = await createJob(user.id, {
       freelancer: values.freelancerAddress as `0x${string}`,
@@ -51,14 +52,19 @@ export async function createJobAction(_prev: CreateJobState, formData: FormData)
       reviewDays,
       revisionDays,
       maxRevisions,
-      candidateUrl: values.candidateUrl || undefined,
+      // Not a validated field in the form: an invalid/over-long link is silently dropped, never stored.
+      candidateUrl: sanitizeCandidateUrl(values.candidateUrl) ?? undefined,
     });
     jobId = res.jobId;
   } catch (err) {
-    const ui = mapActionError(err);
-    return fail(ui.message, ui.field, ui.banner);
+    // The tx may already be on its way: never show "retry"; the job page shows the pending / reconcile state.
+    if (err instanceof JobPendingError) pendingJobId = err.jobId;
+    else {
+      const ui = mapActionError(err);
+      return fail(ui.message, ui.field, ui.banner);
+    }
   }
-  redirect(`/jobs/${jobId}`);
+  redirect(`/jobs/${pendingJobId ?? jobId!}`);
 }
 
 async function ownJob(userId: string, jobId: string) {
