@@ -10,8 +10,10 @@ Dependencies:
 pnpm install            # at repo root, provides @openzeppelin/contracts
 cd contracts
 forge test -vv
-forge script script/Deploy.s.sol --rpc-url <RPC> --private-key <KEY> --broadcast
+cast wallet import deployer --interactive      # one-time: encrypted keystore
+forge script script/Deploy.s.sol --rpc-url <RPC> --account deployer --broadcast
 ```
 
-`Deploy.s.sol` reads `USDC_ADDRESS`; when it is empty it deploys `MockUSDC` first (local anvil).
+`Deploy.s.sol` reads `USDC_ADDRESS`. When it is empty and the chain id is 31337 (local anvil) it deploys `MockUSDC` first;
+on any other chain an empty `USDC_ADDRESS` makes the script revert. The escrow has no owner/admin, so any funded wallet can deploy it.
 It prints `USDC_ADDRESS=0x...` and `ESCROW_ADDRESS=0x...`.

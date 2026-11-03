@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "db:migrate": "drizzle-kit migrate",
     "test:contracts": "cd contracts && forge test",
     "abi": "cd contracts && forge build && cd .. && node scripts/gen-abi.mjs"
   },
