@@ -110,6 +110,8 @@ contract FreelanceEscrow is EIP712, ReentrancyGuard {
     error BadTerms();
     error JobExists();
     error NoRevisionsLeft();
+    /// @notice jobId is not in the buyer's namespace: its high 20 bytes must equal the buyer address.
+    error BadJobId();
 
     constructor(address usdc_) EIP712("FreelanceEscrow", "1") {
         usdc = IERC20(usdc_);
@@ -138,6 +140,10 @@ contract FreelanceEscrow is EIP712, ReentrancyGuard {
 
     /// @notice Callable by anyone (normally the relayer). Safety comes from the EIP-3009 nonce binding the
     ///         terms, and from `receiveWithAuthorization` only being callable by the payee (this contract).
+    /// @dev JOB ID LAYOUT: `jobId = bytes32(bytes20(buyer)) | uint96 salt`, i.e. the buyer address in the high
+    ///      20 bytes followed by a 12-byte salt (`address(bytes20(jobId)) == buyer`, else `BadJobId`).
+    ///      Each buyer owns its own jobId namespace, and only the buyer's EIP-3009 signature can fund a job in
+    ///      it, so nobody can front-run and squat a jobId belonging to another buyer.
     function createJob(
         bytes32 jobId,
         address buyer,
@@ -146,6 +152,7 @@ contract FreelanceEscrow is EIP712, ReentrancyGuard {
         uint256 validBefore,
         bytes calldata usdcSig
     ) external nonReentrant {
+        if (address(bytes20(jobId)) != buyer) revert BadJobId();
         if (_jobs[jobId].state != State.None) revert JobExists();
         if (
             buyer == address(0) || t.freelancer == address(0) || t.freelancer == buyer || t.freelancer == address(this)

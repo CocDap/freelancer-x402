@@ -33,7 +33,7 @@ contract FreelanceEscrowTest is Test {
     address internal relayer = address(0x5E1A7E5);
 
     uint256 internal constant AMOUNT = 100e6;
-    bytes32 internal constant JOB = keccak256("job-1");
+    bytes32 internal JOB; // = _jobId(buyer, 1), set in setUp
 
     bytes32 internal constant RECEIVE_TYPEHASH = keccak256(
         "ReceiveWithAuthorization(address from,address to,uint256 value,uint256 validAfter,uint256 validBefore,bytes32 nonce)"
@@ -55,6 +55,7 @@ contract FreelanceEscrowTest is Test {
         buyer = vm.addr(buyerPk);
         freelancer = vm.addr(freelancerPk);
         stranger = vm.addr(strangerPk);
+        JOB = _jobId(buyer, 1);
         usdc = new MockUSDC();
         escrow = new FreelanceEscrow(address(usdc));
         usdc.mint(buyer, 1_000e6);
@@ -63,6 +64,11 @@ contract FreelanceEscrowTest is Test {
     // ------------------------------------------------------------------
     // helpers
     // ------------------------------------------------------------------
+
+    /// @dev jobId layout: buyer address in the high 20 bytes, 12-byte salt in the low bytes.
+    function _jobId(address owner, uint96 salt) internal pure returns (bytes32) {
+        return bytes32(bytes20(owner)) | bytes32(uint256(salt));
+    }
 
     function _terms() internal view returns (FreelanceEscrow.Terms memory t) {
         t = FreelanceEscrow.Terms({
@@ -183,7 +189,7 @@ contract FreelanceEscrowTest is Test {
         FreelanceEscrow.Terms memory t = _terms();
         bytes memory sig = _usdcSig(JOB, t, buyerPk);
         vm.expectRevert(MockUSDC.InvalidSignature.selector);
-        escrow.createJob(keccak256("other"), buyer, t, 0, _dl(), sig);
+        escrow.createJob(_jobId(buyer, 2), buyer, t, 0, _dl(), sig);
     }
 
     function test_createJob_revertsBadTerms() public {
@@ -240,6 +246,34 @@ contract FreelanceEscrowTest is Test {
         t.deliverDeadline = uint64(block.timestamp + 1);
         _create(JOB, t);
         assertEq(uint8(_state()), uint8(FreelanceEscrow.State.Funded));
+    }
+
+    function test_jobIdLayout() public view {
+        assertEq(address(bytes20(JOB)), buyer);
+        assertEq(uint96(uint256(JOB)), 1);
+    }
+
+    function test_createJob_strangerInOtherBuyersNamespace_reverts() public {
+        usdc.mint(stranger, 1_000e6);
+        FreelanceEscrow.Terms memory t = _terms();
+        t.amount = 1;
+        // stranger funds with their own valid signature, but squats a jobId in the buyer's namespace
+        bytes memory sig = _usdcSig(JOB, t, strangerPk);
+        vm.prank(stranger);
+        vm.expectRevert(FreelanceEscrow.BadJobId.selector);
+        escrow.createJob(JOB, stranger, t, 0, _dl(), sig);
+
+        // buyer's real job still goes through
+        _create();
+        assertEq(escrow.getJob(JOB).buyer, buyer);
+    }
+
+    function test_createJob_buyerArgNotMatchingJobId_reverts() public {
+        FreelanceEscrow.Terms memory t = _terms();
+        bytes32 strangerJob = _jobId(stranger, 1);
+        bytes memory sig = _usdcSig(strangerJob, t, buyerPk);
+        vm.expectRevert(FreelanceEscrow.BadJobId.selector);
+        escrow.createJob(strangerJob, buyer, t, 0, _dl(), sig);
     }
 
     function test_createJob_revertsDuplicateId() public {
@@ -654,7 +688,7 @@ contract FreelanceEscrowTest is Test {
 
     function test_signatureForOtherJob_reverts() public {
         _create();
-        bytes32 job2 = keccak256("job-2");
+        bytes32 job2 = _jobId(buyer, 2);
         _create(job2, _terms());
         uint256 dl = _dl();
         bytes memory sig = _actionSig(freelancerPk, job2, DECLINE, bytes32(0), dl);
