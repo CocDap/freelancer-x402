@@ -25,15 +25,15 @@ Một người thuê đăng nhập bằng username/password. Một AI agent tìm
 pnpm install
 ```
 
-Mẫu biến môi trường (có sẵn mô tả từng key bằng tiếng Việt) đang nằm ở bản nháp:
+Mẫu biến môi trường (kèm chú thích từng key) nằm trong [`docs/env-template.md`](docs/env-template.md): sao chép nội dung vào file env của bạn (không commit), rồi tự điền giá trị. Đừng dán secret vào chat hay vào file được commit.
 
-`/private/tmp/claude-501/-Users-cocdap-avalanche-dapp-avax/cd2e36f7-f148-46b2-8234-296ffc0678ef/scratchpad/env-example.txt`
+Lưu ý: `pnpm db:migrate` đọc `DATABASE_URL` (và `DATABASE_AUTH_TOKEN`) từ biến môi trường của shell, không đọc từ file env của Next. Khi migrate, hãy export các biến này trong shell (xem phần Turso bên dưới).
 
-Bạn tự sao chép nội dung đó vào file env example của repo (để commit, không có secret) và vào file env thật của bạn (không commit), rồi tự điền giá trị. Đừng dán secret vào chat hay vào file được commit.
+Log của server có thể in ra `AVALANCHE_RPC_URL` khi có lỗi RPC. Nếu log được chia sẻ, đừng dùng RPC URL có nhúng sẵn API key.
 
 ### Các biến môi trường
 
-Tất cả đều bắt buộc (trừ `DATABASE_AUTH_TOKEN`). Cột "Secret" = phải giữ kín và đánh dấu Sensitive trên Vercel.
+Tất cả đều bắt buộc (trừ `DATABASE_AUTH_TOKEN`). Mã nguồn không có giá trị mặc định cho key nào; các giá trị ghi "giá trị gợi ý" chỉ là đề xuất. Cột "Secret" = phải giữ kín và đánh dấu Sensitive trên Vercel.
 
 | Key | Secret | Mô tả |
 | --- | --- | --- |
@@ -42,17 +42,17 @@ Tất cả đều bắt buộc (trừ `DATABASE_AUTH_TOKEN`). Cột "Secret" = p
 | `LLM_MODEL` | không | Tên model, ví dụ `gpt-4o-mini`. |
 | `SEARCH_PROVIDER` | không | Provider tìm kiếm; hiện chỉ có `tavily`. |
 | `SEARCH_API_KEY` | có | API key Tavily, dùng chung cho cả ba nguồn. |
-| `X402_FACILITATOR_URL` | không | URL facilitator x402 (mặc định `https://facilitator.payai.network`). |
+| `X402_FACILITATOR_URL` | không | URL facilitator x402 (giá trị gợi ý: `https://facilitator.payai.network`). |
 | `X402_NETWORK` | không | Mạng x402 dạng CAIP-2; Fuji là `eip155:43113`. |
 | `X402_PAY_TO` | không | Địa chỉ ví 0x nhận USDC từ proxy tìm kiếm. |
-| `X402_PRICE_PER_CALL_USDC` | không | Giá mỗi lần gọi proxy (USDC), mặc định `0.01`. |
-| `X402_MAX_PER_CALL_USDC` | không | Trần agent chịu trả cho một lần gọi (USDC), mặc định `0.05`. |
-| `X402_MAX_PER_SEARCH_USDC` | không | Trần tổng chi cho một lượt tìm kiếm (USDC), mặc định `0.50`. |
-| `AVALANCHE_RPC_URL` | không | RPC Fuji C-Chain, mặc định `https://api.avax-test.network/ext/bc/C/rpc`. |
+| `X402_PRICE_PER_CALL_USDC` | không | Giá mỗi lần gọi proxy (USDC), giá trị gợi ý `0.01`. |
+| `X402_MAX_PER_CALL_USDC` | không | Trần agent chịu trả cho một lần gọi (USDC), giá trị gợi ý `0.05`. |
+| `X402_MAX_PER_SEARCH_USDC` | không | Trần tổng chi cho một lượt tìm kiếm (USDC), giá trị gợi ý `0.50`. |
+| `AVALANCHE_RPC_URL` | không | RPC Fuji C-Chain, giá trị gợi ý `https://api.avax-test.network/ext/bc/C/rpc`. |
 | `USDC_ADDRESS` | không | USDC trên Fuji: `0x5425890298aed601595a70AB815c96711a31Bc65`. |
 | `ESCROW_ADDRESS` | không | Địa chỉ `FreelanceEscrow` sau khi deploy. |
 | `RELAYER_PRIVATE_KEY` | có | Private key (0x + 64 hex) của ví relayer trả gas. |
-| `RELAYER_MIN_AVAX` | không | Số AVAX tối thiểu của relayer; thấp hơn thì app cảnh báo. |
+| `RELAYER_MIN_AVAX` | không | Số AVAX tối thiểu của relayer; thấp hơn thì app từ chối gửi giao dịch (không chỉ cảnh báo), giá trị gợi ý `0.05`. |
 | `APP_URL` | không | URL gốc của app, ví dụ `http://localhost:3000` hoặc URL Vercel. |
 | `WALLET_ENCRYPTION_KEY` | có | 32 byte base64 để mã hoá key ví người dùng: `openssl rand -base64 32`. |
 | `AUTH_SECRET` | có | Secret cho better-auth: `openssl rand -base64 32`. |
@@ -149,11 +149,14 @@ turso db tokens create dapp-avax         # => DATABASE_AUTH_TOKEN
 DATABASE_URL=libsql://... DATABASE_AUTH_TOKEN=... pnpm db:migrate
 ```
 
+Lưu ý: token Turso là secret. Gõ thẳng vào lệnh sẽ lưu vào lịch sử shell. Hãy export nó từ nguồn được bảo vệ (password manager, file có quyền hạn chế) hoặc thêm một dấu cách ở đầu dòng lệnh (khi shell bật `HIST_IGNORE_SPACE` / `HISTCONTROL=ignorespace`). `pnpm db:migrate` chỉ đọc `DATABASE_URL` / `DATABASE_AUTH_TOKEN` từ shell, không đọc từ file env của Next.
+
 ### 3. Vercel
 
 1. Import repo vào Vercel (framework Next.js, mặc định).
 2. Thêm toàn bộ biến trong bảng trên vào Project Settings > Environment Variables, đánh dấu Sensitive cho các key "Secret". `DATABASE_URL` là URL Turso, `APP_URL` là URL Vercel.
-3. Deploy, rồi chạy lại checklist trong [`docs/e2e-checklist.md`](docs/e2e-checklist.md) trên URL Vercel.
+3. Deploy, rồi **đăng ký tài khoản ngay lập tức** trên URL Vercel: người đăng ký đầu tiên trở thành chủ sở hữu duy nhất, người đăng ký thứ hai nhận 403. Để lâu, người lạ có thể chiếm tài khoản.
+4. Chạy lại checklist trong [`docs/e2e-checklist.md`](docs/e2e-checklist.md) trên URL Vercel.
 
 Ví relayer phải có AVAX và ví người thuê phải có USDC trước khi thử.
 
@@ -161,15 +164,15 @@ Ví relayer phải có AVAX và ví người thuê phải có USDC trước khi 
 
 Agent không bao giờ trả quá:
 
-- `X402_MAX_PER_CALL_USDC`: trần cho một lần gọi proxy (mặc định 0.05).
-- `X402_MAX_PER_SEARCH_USDC`: trần tổng cho một lượt tìm (mặc định 0.50).
-- `X402_PRICE_PER_CALL_USDC`: giá proxy đòi cho mỗi lần gọi (mặc định 0.01). Nên để giá không vượt trần mỗi lần gọi, nếu không agent sẽ từ chối trả.
+- `X402_MAX_PER_CALL_USDC`: trần cho một lần gọi proxy (giá trị gợi ý 0.05).
+- `X402_MAX_PER_SEARCH_USDC`: trần tổng cho một lượt tìm (giá trị gợi ý 0.50).
+- `X402_PRICE_PER_CALL_USDC`: giá proxy đòi cho mỗi lần gọi (giá trị gợi ý 0.01). Nên để giá không vượt trần mỗi lần gọi, nếu không agent sẽ từ chối trả.
 
 Đổi giá trị trong env (hoặc Environment Variables của Vercel) rồi khởi động lại / deploy lại.
 
 ## Facilitator
 
-Kiểm tra `GET https://facilitator.payai.network/supported` (công khai, không cần auth) ngày 2026-11-03: có `{"x402Version":2,"scheme":"exact","network":"eip155:43113"}` (cả bản v1 `avalanche-fuji`). Vì vậy mặc định dùng PayAI. Nếu sau này facilitator ngừng hỗ trợ Fuji, đổi `X402_FACILITATOR_URL` sang một trong các lựa chọn: thirdweb facilitator, hoặc tự host x402-rs (https://github.com/x402-rs/x402-rs). Không cần sửa code.
+Kiểm tra `GET https://facilitator.payai.network/supported` (công khai, không cần auth) ngày 2026-11-03: có `{"x402Version":2,"scheme":"exact","network":"eip155:43113"}` (cả bản v1 `avalanche-fuji`). Vì vậy giá trị gợi ý là PayAI. Nếu sau này facilitator ngừng hỗ trợ Fuji, đổi `X402_FACILITATOR_URL` sang một trong các lựa chọn: thirdweb facilitator, hoặc tự host x402-rs (https://github.com/x402-rs/x402-rs). Không cần sửa code.
 
 ## Bảo mật
 
@@ -184,4 +187,4 @@ Kiểm tra `GET https://facilitator.payai.network/supported` (công khai, không
 - Tìm kiếm có thể chạy lâu (gọi nhiều nguồn + LLM); trang `/search` đặt `maxDuration = 300` giây, cần gói Vercel cho phép thời lượng này.
 - Chỉ một người thuê / một người dùng chính; chưa có phân quyền nhiều người.
 - SQLite file không bền trên Vercel (hệ thống file tạm), nên bắt buộc dùng Turso khi deploy.
-- Form tạo job chỉ nhận số ngày nguyên cho thời gian duyệt/sửa; xem `docs/e2e-checklist.md` để test với cửa sổ ngắn.
+- Form tạo job nhận số ngày lẻ (tối thiểu 0.001 ngày); server bắt buộc cửa sổ duyệt/sửa tối thiểu 60 giây. Xem `docs/e2e-checklist.md` để test với cửa sổ ngắn.
