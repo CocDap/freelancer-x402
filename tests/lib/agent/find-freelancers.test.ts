@@ -6,7 +6,7 @@ import { createDb, type Db } from "@/lib/db/client";
 import { search } from "@/lib/db/schema";
 import { createUserWallet } from "@/lib/wallet/user-wallet";
 import { BudgetExceededError } from "@/lib/x402/client";
-import { normalizeUrl, runFreelancerSearch } from "@/lib/agent/find-freelancers";
+import { createGrounding, normalizeUrl, runFreelancerSearch } from "@/lib/agent/find-freelancers";
 import type { Brief } from "@/lib/agent/schema";
 
 const BRIEF: Brief = { topic: "crypto blog", contentType: "bài blog", language: "vi" };
@@ -58,7 +58,83 @@ describe("normalizeUrl", () => {
   });
 });
 
+const h = (url: string, source: "x" | "linkedin" | "threads" = "x") => ({ source, url, title: "", snippet: "" });
+function grounding(...hits: ReturnType<typeof h>[]) {
+  const g = createGrounding();
+  for (const x of hits) g.add(x);
+  return g;
+}
+
+describe("createGrounding", () => {
+  it("accepts x.com/handle from a status hit and emits canonical url", () => {
+    const g = grounding(h("https://x.com/Alice/status/123"));
+    expect(g.profile("https://x.com/alice")?.url).toBe("https://x.com/Alice");
+    expect(g.profile("https://mobile.twitter.com/alice/")?.url).toBe("https://x.com/Alice");
+  });
+  it("twitter.com hit grounds x.com profile", () => {
+    expect(grounding(h("https://twitter.com/bob/status/1")).profile("https://x.com/bob")?.url).toBe("https://x.com/bob");
+  });
+  it("linkedin /in/name from a deeper hit; /posts rejected", () => {
+    const g = grounding(h("https://www.linkedin.com/in/jane-doe/recent-activity/all", "linkedin"), h("https://www.linkedin.com/posts/jane-doe_abc", "linkedin"));
+    const p = g.profile("https://linkedin.com/in/jane-doe");
+    expect(p?.url).toBe("https://linkedin.com/in/jane-doe");
+    expect(p?.source).toBe("linkedin");
+    expect(g.profile("https://www.linkedin.com/posts")).toBeNull();
+    expect(g.profile("https://www.linkedin.com/posts/jane-doe_abc")).toBeNull();
+  });
+  it("threads handle, and threads.com equals threads.net", () => {
+    const g = grounding(h("https://www.threads.net/@carol/post/xyz", "threads"));
+    expect(g.profile("https://threads.com/@carol")?.url).toBe("https://threads.net/@carol");
+  });
+  it("matches on whole segments only", () => {
+    expect(grounding(h("https://x.com/alice/status/1")).profile("https://x.com/ali")).toBeNull();
+  });
+  it("rejects reserved paths, bare host and unseen hosts", () => {
+    const g = grounding(h("https://x.com/search?q=a"), h("https://x.com/alice"));
+    expect(g.profile("https://x.com/search")).toBeNull();
+    expect(g.profile("https://x.com")).toBeNull();
+    expect(g.profile("https://evil.com/alice")).toBeNull();
+  });
+  it("sample urls need an exact seen match and emit the hit's own url", () => {
+    const g = grounding(h("https://x.com/alice/status/1"));
+    expect(g.sample("https://twitter.com/alice/status/1/?s=2")).toBe("https://x.com/alice/status/1");
+    expect(g.sample("https://x.com/alice")).toBeNull();
+  });
+});
+
 describe("runFreelancerSearch", () => {
+  it("describes the output shape in the final structured step", async () => {
+    const model = new MockLanguageModelV4({ doGenerate: [toolCall("search_x", "q"), text("done"), output([cand()])] });
+    await runFreelancerSearch("u1", BRIEF, { model, fetch: hitsFetch([HIT]), database: db });
+    const last = JSON.stringify(model.doGenerateCalls.at(-1)!.prompt);
+    for (const k of ["candidates", "name", "handle", "profileUrl", "sampleUrls", "source", "fitReason", "risks"]) {
+      expect(last).toContain(k);
+    }
+  });
+
+  it("still runs the final step on collected hits when the tool loop throws", async () => {
+    let n = 0;
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        n++;
+        if (n === 1) return toolCall("search_x", "q");
+        if (n === 2) throw new Error("boom");
+        return output([cand()]);
+      },
+    });
+    const r = await runFreelancerSearch("u1", BRIEF, { model, fetch: hitsFetch([HIT]), database: db });
+    expect(r.candidates).toHaveLength(1);
+    expect(r.warnings).toContain("Mô hình AI lỗi, thử lại sau.");
+  });
+
+  it("caps the hits fed to the final step", async () => {
+    const hits = Array.from({ length: 100 }, (_, i) => ({ ...HIT, url: `https://x.com/u${i}` }));
+    const model = new MockLanguageModelV4({ doGenerate: [toolCall("search_x", "q"), text("done"), output([])] });
+    await runFreelancerSearch("u1", BRIEF, { model, fetch: hitsFetch(hits), database: db });
+    const last = JSON.stringify(model.doGenerateCalls.at(-1)!.prompt);
+    expect((last.match(/https:\/\/x\.com\/u\d+/g) ?? []).length).toBe(60);
+  });
+
   it("returns candidates only with urls seen in hits", async () => {
     const model = new MockLanguageModelV4({
       doGenerate: [
